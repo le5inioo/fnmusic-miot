@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Miot小爱音箱 · 控制台</title>
+  <link rel="icon" type="image/png" href="static/icon.png" />
+  <style>
+    /* =========================================================================
+     * 控制台外壳。和面板共用一套 Material 3 语义色，保证「工具条 + 面板」是一体。
+     * 亮/暗跟随面板同一个 localStorage 键，改主题时两处同时切换。
+     * ====================================================================== */
+    :root {
+      --bg: #eceaf4;
+      /* 工具条比面板底色低一档，读作「窗口栏」，而不是和面板糊成一片 */
+      --bar: rgba(240, 238, 247, .92);
+      --panel: #ffffff;
+      --line: #e0ddea;
+      --line-soft: rgba(27, 27, 33, .07);
+      --text: #1b1b21;
+      --muted: #56535f;
+      --accent: #5a4be0;
+      --accent-2: #9a4a9e;
+      --on-accent: #ffffff;
+      --accent-soft: rgba(90, 75, 224, .10);
+      --hover: rgba(27, 27, 33, .05);
+      --press: rgba(27, 27, 33, .09);
+      --ok: #1c6f45;
+      --ok-soft: rgba(28, 111, 69, .12);
+      --warn: #8a6100;
+      --warn-soft: rgba(160, 112, 0, .14);
+      --bad: #b3261e;
+      --bad-soft: rgba(179, 38, 30, .12);
+      --shadow: 0 2px 6px rgba(24, 26, 48, .07), 0 12px 32px rgba(24, 26, 48, .10);
+      --shadow-lg: 0 8px 20px rgba(24, 26, 48, .12), 0 24px 56px rgba(24, 26, 48, .16);
+      --radius: 12px;
+      color-scheme: light;
+    }
+    :root[data-theme='dark'] {
+      --bg: #0d0d12;
+      --bar: rgba(29, 28, 36, .92);
+      --panel: #1d1c24;
+      --line: #2e2c38;
+      --line-soft: rgba(255, 255, 255, .08);
+      --text: #e6e2ee;
+      --muted: #b6b2c1;
+      --accent: #c3baff;
+      --accent-2: #f2b2e8;
+      --on-accent: #291b8f;
+      --accent-soft: rgba(195, 186, 255, .14);
+      --hover: rgba(255, 255, 255, .07);
+      --press: rgba(255, 255, 255, .12);
+      --ok: #86e3ae;
+      --ok-soft: rgba(134, 227, 174, .14);
+      --warn: #ffd08a;
+      --warn-soft: rgba(255, 208, 138, .14);
+      --bad: #ffb4ab;
+      --bad-soft: rgba(255, 180, 171, .14);
+      --shadow: 0 2px 6px rgba(0, 0, 0, .45), 0 12px 32px rgba(0, 0, 0, .40);
+      --shadow-lg: 0 8px 22px rgba(0, 0, 0, .52), 0 24px 56px rgba(0, 0, 0, .48);
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+            'Microsoft YaHei', 'Noto Sans SC', sans-serif;
+      -webkit-font-smoothing: antialiased;
+      transition: background-color .22s ease, color .22s ease;
+    }
+    .app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+
+    /* ------------------------------------------------------------------ 工具条 */
+    /* 用网格而不是 flex 换行：行结构确定，不会出现「按钮被挤出屏幕」 */
+    .bar {
+      position: relative;
+      z-index: 10;
+      flex: 0 0 auto;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas: 'brand chips actions';
+      align-items: center;
+      column-gap: 10px;
+      row-gap: 8px;
+      padding: 9px 14px;
+      background: var(--bar);
+      border-bottom: 1px solid var(--line-soft);
+      /* 面板顶栏与本工具条同为浅色，只靠 1px 淡线分不开层次；
+         补一层极浅投影，让工具条读作独立窗口栏。 */
+      box-shadow: 0 1px 0 var(--line), 0 8px 18px -12px rgba(24, 26, 48, .35);
+      backdrop-filter: saturate(1.5) blur(18px);
+      -webkit-backdrop-filter: saturate(1.5) blur(18px);
+    }
+    /* 顶部一条品牌渐变线，给纯色工具条一点识别度 */
+    .bar::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      opacity: .9;
+    }
+
+    .brand { grid-area: brand; display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .logo {
+      width: 34px; height: 34px; flex: none;
+      border-radius: 11px;
+      background: linear-gradient(140deg, var(--accent), var(--accent-2));
+      display: grid; place-items: center;
+      color: #fff; font-size: 18px; font-weight: 700; line-height: 1;
+      box-shadow: 0 4px 12px rgba(90, 75, 224, .28);
+      user-select: none;
+    }
+    .brand-text { min-width: 0; }
+    .brand-text b {
+      display: block; font-size: 15px; font-weight: 650; letter-spacing: .2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .brand-text small {
+      display: block; color: var(--muted); font-size: 11.5px; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* ------------------------------------------------------------- 状态胶囊 */
+    .chips { grid-area: chips; justify-self: start; display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      height: 28px; padding: 0 10px;
+      min-width: 0; overflow: hidden;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      background: var(--hover);
+      color: var(--muted);
+      font: inherit; font-size: 12px; line-height: 1;
+      white-space: nowrap; cursor: default;
+      transition: background .16s ease, color .16s ease, border-color .16s ease;
+    }
+    button.chip { cursor: pointer; }
+    button.chip:hover { background: var(--press); color: var(--text); }
+    .chip.ok { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+    .chip.warn { background: var(--warn-soft); color: var(--warn); }
+    .chip.bad { background: var(--bad-soft); color: var(--bad); }
+    .chip .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dot {
+      width: 7px; height: 7px; border-radius: 50%; flex: none;
+      background: currentColor;
+      box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent);
+    }
+    .dot.pulse { animation: pulse 1.4s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+    /* 弹性留白由 grid 的 minmax(0,1fr) 中列承担，不再需要 spacer 元素 */
+
+    /* --------------------------------------------------------------- 控件通用 */
+    button {
+      appearance: none; font: inherit; cursor: pointer;
+      color: var(--text);
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+      height: 34px; padding: 0 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--panel);
+      font-size: 13px; font-weight: 500;
+      text-decoration: none; white-space: nowrap;
+      transition: background .15s ease, border-color .15s ease,
+                  transform .08s ease, box-shadow .15s ease;
+    }
+    .btn:hover { background: var(--hover); border-color: var(--accent); }
+    .btn:active { transform: scale(.97); background: var(--press); }
+    .btn svg { width: 16px; height: 16px; flex: none; }
+    .btn.icon-only { width: 34px; padding: 0; }
+    .btn.primary {
+      background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+      box-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 32%, transparent);
+    }
+    .btn.primary:hover { filter: brightness(1.06); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* --------------------------------------------------------- 缩放（分段控件） */
+    .seg {
+      display: inline-flex; align-items: center;
+      height: 34px; padding: 2px;
+      border: 1px solid var(--line); border-radius: 10px;
+      background: var(--panel);
+      flex: none;
+    }
+    .seg button {
+      display: grid; place-items: center;
+      min-width: 28px; height: 28px; padding: 0 6px;
+      border: 0; border-radius: 7px; background: transparent;
+      font-size: 14px; font-weight: 600; line-height: 1;
+      transition: background .14s ease, color .14s ease;
+    }
+    .seg button:hover { background: var(--hover); }
+    .seg button:active { background: var(--press); }
+    .seg .value {
+      min-width: 54px; font-size: 12.5px; font-weight: 600;
+      font-variant-numeric: tabular-nums; color: var(--muted);
+    }
+    .seg .value:hover { color: var(--text); }
+
+    /* 缩放 + 动作按钮作为一个整体：窄屏时整组换到第二行并右对齐 */
+    .actions {
+      grid-area: actions;
+      display: flex; align-items: center; flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px; row-gap: 6px;
+      min-width: 0;
+      justify-self: end;
+    }
+    .divider { width: 1px; height: 20px; background: var(--line); flex: none; margin: 0 2px; }
+
+    /* ------------------------------------------------------------------ 舞台 */
+    .stage { flex: 1 1 auto; position: relative; overflow: hidden; background: var(--bg); }
+    #frame {
+      position: absolute; top: 0; left: 0;
+      border: 0; margin: 0; padding: 0;
+      background: var(--panel);
+      transform-origin: top left;
+      border-radius: 0;
+    }
+    /* fnOS 桌面本身已有应用窗口框（标题栏 + 边框），内层的工具条默认收起。
+       入口放在画布「顶部正中」贴边：内嵌面板顶栏的按钮组（选择设备/刷新/设置）
+       固定在右端、返回按钮在左端，中间只有不可点的标题文字；把手只占顶部 16px，
+       不会像旧版右上角 32px 圆点那样压住「设置」按钮。状态点同步控制层状态。 */
+    #bare-toggle {
+      position: absolute; top: 0; left: 50%; margin-left: -26px; z-index: 6;
+      display: none;
+      align-items: center; justify-content: center;
+      width: 52px; height: 16px; padding: 0;
+      border: 0; border-radius: 0 0 10px 10px;
+      background: var(--bar);
+      box-shadow: 0 2px 10px rgba(24, 26, 48, .18);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      cursor: pointer;
+      opacity: .5;
+      transition: opacity .18s ease, transform .15s ease;
+    }
+    #bare-toggle:hover, #bare-toggle:focus-visible { opacity: 1; transform: translateY(-2px); }
+    #bare-toggle svg { width: 14px; height: 14px; }
+    .tb-dot {
+      position: absolute; top: 4px; right: 7px;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--muted);
+      box-shadow: 0 0 0 2px var(--bar);
+    }
+    .tb-dot.ok { background: var(--ok); }
+    .tb-dot.warn { background: var(--warn); }
+    .tb-dot.bad { background: var(--bad); }
+    /* 位置变体：tc = 顶部正中（默认，零遮挡）；tr/tl = 旧式角落圆点，供对比或回退。
+       通过 ?fab=tr|tl|tc 指定，选择记在 localStorage。 */
+    body[data-fab="tr"] #bare-toggle,
+    body[data-fab="tl"] #bare-toggle {
+      top: 12px; height: 32px; width: 32px;
+      border: 1px solid var(--line); border-radius: 50%;
+    }
+    body[data-fab="tr"] #bare-toggle { left: auto; right: 14px; margin-left: 0; }
+    body[data-fab="tl"] #bare-toggle { left: 14px; margin-left: 0; }
+    body[data-fab="tr"] #bare-toggle svg,
+    body[data-fab="tl"] #bare-toggle svg { width: 17px; height: 17px; }
+    body[data-fab="tr"] .tb-dot,
+    body[data-fab="tl"] .tb-dot { top: 3px; right: 3px; width: 7px; height: 7px; }
+    body.bare .bar { display: none; }
+    body.bare #bare-toggle { display: inline-flex; }
+
+    /* ------------------------------------------------------------------ 提示 */
+    #notice {
+      position: absolute; left: 50%; bottom: 20px;
+      transform: translate(-50%, 12px);
+      z-index: 8;
+      max-width: min(92vw, 620px);
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 11px 15px;
+      border-radius: 14px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-lg);
+      font-size: 13px; line-height: 1.55; color: var(--text);
+      opacity: 0; pointer-events: none;
+      transition: opacity .2s ease, transform .2s ease;
+    }
+    #notice.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+    #notice[hidden] { display: none; }
+    #notice .n-icon {
+      flex: none; width: 18px; height: 18px; margin-top: 1px;
+      display: grid; place-items: center; color: var(--accent);
+    }
+    #notice .n-icon svg { width: 18px; height: 18px; }
+
+    /* ---------------------------------------------------------------- 响应式 */
+    @media (max-width: 1000px) {
+      .brand-text small { display: none; }
+      .actions .btn .label { display: none; }
+      .actions .btn { width: 34px; padding: 0; }
+    }
+    @media (max-width: 700px) {
+      /* 单行放不下：动作区整块落到第二行，品牌与状态留在第一行 */
+      .bar {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas: 'brand chips' 'actions actions';
+        column-gap: 8px; row-gap: 6px;
+        padding: 8px 10px;
+      }
+      .brand-text { display: none; }
+      .seg .value { min-width: 46px; }
+    }
+    @media (max-width: 620px) {
+      /* 手机上全屏意义不大，让位给缩放/主题/刷新 */
+      #btn-fullscreen { display: none !important; }
+      .divider { display: none !important; }
+      /* 曲库数量次要，先让位；状态文字保留到更窄 */
+      #chip-lib .txt { display: none; }
+    }
+    @media (max-width: 520px) {
+      .chip { padding: 0 8px; }
+      .hide-xs { display: none !important; }
+    }
+    @media (max-width: 430px) {
+      #chip-status .txt { display: none; }
+    }
+    @media (max-width: 380px) {
+      .seg .value { min-width: 40px; }
+      #btn-reload { display: none !important; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="bar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">♪</span>
+        <span class="brand-text">
+          <b>Miot小爱音箱</b>
+          <small>独立控制台</small>
+        </span>
+      </div>
+
+      <div class="chips">
+        <span class="chip" id="chip-status" title="控制层运行状态">
+          <span class="dot pulse" id="status-dot"></span>
+          <span class="txt" id="status-text">检查中…</span>
+        </span>
+        <button type="button" class="chip" id="chip-lib" title="飞牛音乐曲库索引">
+          <span class="dot" id="lib-dot"></span>
+          <span class="txt" id="lib-text">曲库检查中…</span>
+        </button>
+      </div>
+
+      <div class="actions">
+        <div class="seg" role="group" aria-label="面板缩放">
+          <button type="button" id="zoom-out" title="缩小（Alt+−）" aria-label="缩小">−</button>
+          <button type="button" class="value" id="zoom-label" title="点击恢复 115%">115%</button>
+          <button type="button" id="zoom-in" title="放大（Alt++）" aria-label="放大">+</button>
+        </div>
+        <span class="divider hide-xs"></span>
+        <button type="button" class="btn icon-only" id="btn-theme" title="切换主题（Alt+T）" aria-label="切换主题">
+          <svg id="theme-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="4"></circle>
+            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
+          </svg>
+        </button>
+        <button type="button" class="btn" id="btn-reload" title="刷新面板（Alt+R）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+            <path d="M21 3v6h-6"></path>
+          </svg>
+          <span class="label">刷新</span>
+        </button>
+        <button type="button" class="btn" id="btn-fullscreen" title="全屏（Alt+F）">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path>
+          </svg>
+          <span class="label">全屏</span>
+        </button>
+        <span class="divider hide-xs"></span>
+        <a class="btn hide-xs" id="btn-raw" href="#" target="_blank" rel="noopener" title="新标签页打开不带工具条的面板">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M14 4h6v6"></path>
+            <path d="M20 4 11 13"></path>
+            <path d="M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"></path>
+          </svg>
+          <span class="label">纯净面板</span>
+        </a>
+        <button type="button" class="btn icon-only" id="bar-collapse" title="收起工具条（Alt+H）" aria-label="收起工具条">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M6 9l6-6 6 6M6 15l6 6 6-6"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="stage" id="stage">
+      <iframe id="frame" title="Miot小爱音箱控制台" src="about:blank"
+              allow="autoplay; encrypted-media; fullscreen; picture-in-picture"></iframe>
+      <button type="button" id="bare-toggle" title="工具条已收起 · 点击展开（Alt+H）" aria-label="展开工具条">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <circle cx="6" cy="12" r="1.7"></circle>
+          <circle cx="12" cy="12" r="1.7"></circle>
+          <circle cx="18" cy="12" r="1.7"></circle>
+        </svg>
+        <span class="tb-dot" id="tb-dot"></span>
+      </button>
+      <div id="notice" hidden role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    /* ---------------------------------------------------------------- 常量 */
+    // 网关前缀从自身路径推导：
+    //   /app/fnmusic-miot/console -> /app/fnmusic-miot （经 fnOS 网关）
+    //   /console                  -> ''                 （直连 8776）
+    // 早先误兜底成 /app/fnmusic-ext，会让直连时面板与 API 全打向不存在的旧前缀。
+    var PREFIX = location.pathname.replace(/\/console\/?$/, '');
+    var PANEL = PREFIX + '/';
+    // 控制层状态与曲库索引都读同源反代的 /indexing/status（WebUI 自动注入 token）。
+    var STATUS_API = PREFIX + '/indexing/status';
+    // 只读能力状态：fnmusic-ext 在位与否（2.1.0 起它是可选增强）。
+    var CAP_API = PREFIX + '/compat/status';
+    var ZOOM_KEY = 'fnmusic.miot.console.zoom';
+    var THEME_KEY = 'fnmusic.miot.theme';
+    var TOOLBAR_KEY = 'fnmusic.miot.console.toolbar';
+    var FAB_KEY = 'fnmusic.miot.console.fab';
+
+    var stage = document.getElementById('stage');
+    var frame = document.getElementById('frame');
+    var zoomLabel = document.getElementById('zoom-label');
+    var notice = document.getElementById('notice');
+
+    var THEME_ICONS = {
+      // 亮色：显示太阳（点击可切到暗色）
+      light: '<circle cx="12" cy="12" r="4"></circle>' +
+             '<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>',
+      // 暗色：显示月亮
+      dark: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>',
+      // 跟随系统：显示显示器
+      auto: '<rect x="2" y="4" width="20" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path>'
+    };
+
+    /* -------------------------------------------------------------- 主题 */
+    function readPref() {
+      var v = null;
+      try { v = localStorage.getItem(THEME_KEY); } catch (e) {}
+      return (v === 'light' || v === 'dark') ? v : 'auto';
+    }
+    function systemDark() {
+      return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    }
+    function resolvedTheme() {
+      var p = readPref();
+      if (p === 'light' || p === 'dark') return p;
+      return systemDark() ? 'dark' : 'light';
+    }
+    function paintTheme() {
+      var theme = resolvedTheme();
+      document.documentElement.setAttribute('data-theme', theme);
+      var icon = document.getElementById('theme-icon');
+      if (icon) icon.innerHTML = THEME_ICONS[theme] || THEME_ICONS.light;
+      var btn = document.getElementById('btn-theme');
+      if (btn) {
+        var pref = readPref();
+        btn.title = '主题：' + (pref === 'auto' ? '跟随系统' : (pref === 'dark' ? '暗色' : '亮色')) +
+                    '（点击切换，Alt+T）';
+      }
+    }
+    function setThemePref(pref) {
+      try { localStorage.setItem(THEME_KEY, pref); } catch (e) {}
+      paintTheme();
+      // 同源 localStorage 变更会触发 iframe 的 storage 事件，面板会自己跟上。
+      // 少数浏览器在 iframe 初次加载时可能漏事件，这里补一次直接下发。
+      try {
+        var doc = frame.contentDocument;
+        if (doc && doc.documentElement) {
+          doc.documentElement.setAttribute('data-theme', resolvedTheme());
+        }
+      } catch (e) {}
+    }
+    function cycleTheme() {
+      var order = ['auto', 'light', 'dark'];
+      var next = order[(order.indexOf(readPref()) + 1) % order.length];
+      setThemePref(next);
+      toast(next === 'auto' ? '主题：跟随系统' : (next === 'dark' ? '主题：暗色' : '主题：亮色'));
+    }
+    paintTheme();
+    if (window.matchMedia) {
+      var mq = window.matchMedia('(prefers-color-scheme: dark)');
+      var onSys = function () { if (readPref() === 'auto') paintTheme(); };
+      if (mq.addEventListener) mq.addEventListener('change', onSys);
+      else if (mq.addListener) mq.addListener(onSys);
+    }
+    document.getElementById('btn-theme').addEventListener('click', cycleTheme);
+
+    /* -------------------------------------------------------------- 缩放 */
+    document.getElementById('btn-raw').href = PANEL;
+    frame.src = PANEL;
+
+    function clamp(v) { return Math.max(80, Math.min(200, v)); }
+    // 面板是桌面版式：曲目行（封面/标题/艺术家/专辑/时长/播放/删除）在窄于这个
+    // 逻辑宽度时会被裁掉尾部按钮。据此给缩放设上限，窄窗口自动降倍率而不是溢出。
+    var MIN_PANEL_W = 520;
+
+    // iframe / 隐私模式下 localStorage 可能直接抛 SecurityError，读写都要兜住。
+    var saved = null;
+    try { saved = localStorage.getItem(ZOOM_KEY); } catch (e) {}
+    // 窄屏默认不放大
+    var defaultZoom = window.innerWidth < 700 ? 100 : 115;
+    var zoom = clamp(parseInt(saved || String(defaultZoom), 10) || defaultZoom);
+
+    function effectiveScale() {
+      var avail = Math.max(1, stage.clientWidth);
+      return Math.max(0.6, Math.min(zoom / 100, avail / MIN_PANEL_W));
+    }
+
+    // 模拟浏览器缩放：按 1/s 给 iframe 实际尺寸，再用 transform 放大回容器大小。
+    // 面板按较窄视口排版，视觉上字号/控件/间距整体变大，且布局不会溢出。
+    function fit() {
+      var scale = effectiveScale();
+      frame.style.width = Math.max(MIN_PANEL_W, stage.clientWidth / scale) + 'px';
+      frame.style.height = Math.max(320, stage.clientHeight / scale) + 'px';
+      frame.style.transform = 'scale(' + scale + ')';
+      var shown = Math.round(scale * 100);
+      zoomLabel.textContent = shown + '%';
+      zoomLabel.title = shown === zoom
+        ? '点击恢复 115%'
+        : '窗口宽度受限，实际 ' + shown + '%（点击恢复 115%）';
+    }
+    function setZoom(v) {
+      var before = effectiveScale();
+      zoom = clamp(Math.round(v / 5) * 5);
+      try { localStorage.setItem(ZOOM_KEY, String(zoom)); } catch (e) {}
+      fit();
+      // 已经顶到窗口上限时给个提示，不然点了没反应会以为是坏了
+      if (zoom > before * 100 + 0.5 && effectiveScale() <= before + 0.001) {
+        toast('窗口太窄，已是当前可见的最大缩放。可以先全屏再放大。');
+      }
+    }
+    document.getElementById('zoom-out').addEventListener('click', function () { setZoom(zoom - 10); });
+    document.getElementById('zoom-in').addEventListener('click', function () { setZoom(zoom + 10); });
+    zoomLabel.addEventListener('click', function () { setZoom(115); });
+    window.addEventListener('resize', fit);
+    document.addEventListener('fullscreenchange', fit);
+    if (window.ResizeObserver) { new ResizeObserver(fit).observe(stage); }
+    fit();
+
+    /* -------------------------------------------------------------- 提示 */
+    var NOTICE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
+      'stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle>' +
+      '<path d="M12 8h.01M11 12h1v4h1"></path></svg>';
+
+    function toast(msg) {
+      notice.innerHTML = '<span class="n-icon">' + NOTICE_ICON + '</span><span>' + msg + '</span>';
+      notice.hidden = false;
+      // 下一帧再加 class，保证过渡动画能触发
+      requestAnimationFrame(function () { notice.classList.add('show'); });
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(function () {
+        notice.classList.remove('show');
+        setTimeout(function () { notice.hidden = true; }, 220);
+      }, 4200);
+    }
+    notice.addEventListener('click', function () {
+      notice.classList.remove('show');
+      setTimeout(function () { notice.hidden = true; }, 220);
+    });
+
+    /* -------------------------------------------------------------- 动作 */
+    function reloadPanel() {
+      try { frame.contentWindow.location.reload(); }
+      catch (e) { frame.src = PANEL + '?t=' + Date.now(); }
+    }
+    function toggleFullscreen() {
+      var el = document.documentElement;
+      var req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!req) { toast('当前浏览器不支持全屏，可点「纯净面板」在新标签页打开后按 Ctrl + 加号放大'); return; }
+      try {
+        if (document.fullscreenElement) { document.exitFullscreen(); }
+        else {
+          Promise.resolve(req.call(el)).catch(function () {
+            toast('窗口不允许全屏，可点「纯净面板」在新标签页打开');
+          });
+        }
+      } catch (e) { toast('窗口不允许全屏，可点「纯净面板」在新标签页打开'); }
+    }
+    document.getElementById('btn-reload').addEventListener('click', reloadPanel);
+    document.getElementById('btn-fullscreen').addEventListener('click', toggleFullscreen);
+
+    /* -------------------------------------------------------- 工具条显隐 */
+    // fnOS 桌面把本页嵌在自己的应用窗口里，外层已有标题栏/边框，再放一条
+    // 带应用名与窗口级按钮的工具条显得重复，所以网关内嵌时默认收起。
+    // 直连 8776（排障）默认展开；URL 参数强制覆盖，用户选择记在 localStorage。
+    function resolveBareMode(search, saved, embedded) {
+      var q = new URLSearchParams(search || '');
+      if (q.get('bar') === '1') return false;
+      if (q.get('bare') === '1') return true;
+      if (saved === 'bare') return true;
+      if (saved === 'bar') return false;
+      return !!embedded;
+    }
+    /* ------------------------------------------------------ 收起后的入口位置 */
+    // 默认 tc（顶部正中）：内嵌面板顶栏右端是「设置」按钮，旧版右上角 32px 圆点
+    // 正好压住它。?fab=tr / tl 可切回角落圆点，便于对比或按习惯回退；
+    // 非法值一律回落到 tc，选择记在 localStorage。
+    function resolveFabPos(search, saved) {
+      var v = new URLSearchParams(search || '').get('fab') || saved || 'tc';
+      return /^(tc|tr|tl)$/.test(v) ? v : 'tc';
+    }
+    var savedFab = null;
+    try { savedFab = localStorage.getItem(FAB_KEY); } catch (e) {}
+    var fabPos = resolveFabPos(location.search, savedFab);
+    try { localStorage.setItem(FAB_KEY, fabPos); } catch (e) {}
+    document.body.setAttribute('data-fab', fabPos);
+
+    var embedded = /^\/app\//.test(PREFIX);
+    var savedToolbar = null;
+    try { savedToolbar = localStorage.getItem(TOOLBAR_KEY); } catch (e) {}
+    var bare = resolveBareMode(location.search, savedToolbar, embedded);
+
+    function applyBare() {
+      document.body.classList.toggle('bare', bare);
+      setTimeout(fit, 0);
+    }
+    function setBare(v) {
+      bare = v;
+      try { localStorage.setItem(TOOLBAR_KEY, v ? 'bare' : 'bar'); } catch (e) {}
+      applyBare();
+    }
+    applyBare();
+    document.getElementById('bare-toggle').addEventListener('click', function () { setBare(false); });
+    document.getElementById('bar-collapse').addEventListener('click', function () { setBare(true); });
+
+    /* ------------------------------------------------------------ 快捷键 */
+    // 只监听 Alt 组合与少量无修饰键；避免和面板自身的空格播放、方向键冲突。
+    function handleShortcut(e) {
+      if (e.defaultPrevented) return;
+      var key = (e.key || '').toLowerCase();
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        if (key === 'r') { e.preventDefault(); reloadPanel(); return true; }
+        if (key === 'f') { e.preventDefault(); toggleFullscreen(); return true; }
+        if (key === 'h') { e.preventDefault(); setBare(!bare); return true; }
+        if (key === 't') { e.preventDefault(); cycleTheme(); return true; }
+        if (key === '0') { e.preventDefault(); setZoom(115); return true; }
+        if (key === '+' || key === '=' || key === 'add') { e.preventDefault(); setZoom(zoom + 10); return true; }
+        if (key === '-' || key === '_' || key === 'subtract') { e.preventDefault(); setZoom(zoom - 10); return true; }
+      }
+    }
+    // 外层文档（工具条获得焦点时）
+    document.addEventListener('keydown', handleShortcut);
+    // 面板文档（同源，鼠标在面板里操作时也能用；面板重载后需重新挂）
+    function bindFrameShortcuts() {
+      try {
+        var doc = frame.contentDocument;
+        if (!doc || doc.__miotShortcutsBound) return;
+        doc.__miotShortcutsBound = true;
+        doc.addEventListener('keydown', handleShortcut);
+      } catch (e) {}
+    }
+    frame.addEventListener('load', function () {
+      fit();
+      bindFrameShortcuts();
+      // 面板刚加载完可能还没应用主题，补一次
+      try {
+        var doc = frame.contentDocument;
+        if (doc && doc.documentElement) {
+          doc.documentElement.setAttribute('data-theme', resolvedTheme());
+        }
+      } catch (e) {}
+    });
+
+    /* -------------------------------------------------------- 状态与曲库 */
+    // 曲库为 0 首往往不是本插件的问题，而是飞牛音乐自己的曲库接口异常
+    // （trim.music 调 open gateway 的 trim.file.getSharedAccessibleFolders 返回 500，
+    // 官方 App 的歌曲/专辑页同样打不开）。把判断依据直接摆出来，省得反复排查。
+    var libHint = '曲库索引为空。先打开飞牛音乐查看「歌曲」列表：若那边也打不开/为空，' +
+      '说明是系统侧曲库接口异常（trim.music 调用 trim.file.getSharedAccessibleFolders 返回 500），' +
+      '与本插件无关，需升级 fnOS 系统或飞牛音乐应用后再点面板里的「刷新曲库」。';
+
+    var chipStatus = document.getElementById('chip-status');
+    var dot = document.getElementById('status-dot');
+    var statusText = document.getElementById('status-text');
+    var chipLib = document.getElementById('chip-lib');
+    var libDot = document.getElementById('lib-dot');
+    var libText = document.getElementById('lib-text');
+    // 工具条收起时，顶部正中的贴边把手承担状态显示
+    var fab = document.getElementById('bare-toggle');
+    var fabDot = document.getElementById('tb-dot');
+    // 纯官方模式的说明，由 /compat/status 填；空串表示在线增强可用。
+    var extHint = '';
+
+    function setChip(el, state) {
+      el.classList.remove('ok', 'warn', 'bad');
+      if (state) el.classList.add(state);
+    }
+    function showStatus(text, state, title) {
+      dot.className = 'dot' + (state ? ' ' + state : '');
+      statusText.textContent = text;
+      setChip(chipStatus, state);
+      chipStatus.title = title || (extHint ? extHint : text);
+      if (fabDot) fabDot.className = 'tb-dot' + (state ? ' ' + state : '');
+      if (fab) fab.title = text + ' · 点击展开工具条（Alt+H）';
+    }
+    function showLib(text, state, hint) {
+      libDot.className = 'dot' + (state ? ' ' + state : '');
+      libText.textContent = text;
+      setChip(chipLib, state);
+      var tip = hint || (extHint ? extHint : '飞牛音乐曲库索引');
+      chipLib.title = tip;
+      chipLib.onclick = function () { toast(tip); };
+      if (fab) fab.title = statusText.textContent + ' · ' + text + ' · 点击展开工具条（Alt+H）';
+    }
+
+    // 一次请求同时喂两个胶囊，减少一半上行请求
+    function refreshStatus() {
+      fetch(STATUS_API, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
+        .then(function (d) {
+          var online = d && d.success !== false;
+          showStatus(online ? '控制层在线' : '控制层未就绪', online ? 'ok' : 'bad');
+
+          var s = (d && d.data) || {};
+          var n = Number(s.song_count || 0);
+          if (s.ready && n > 0) { showLib('曲库 ' + n + ' 首', 'ok'); }
+          else if (s.is_refreshing) { showLib('曲库索引中…', 'warn', '正在从飞牛音乐拉取曲库，稍等…'); }
+          else { showLib('曲库不可用', 'bad', libHint); }
+        })
+        .catch(function () {
+          showStatus('控制层状态未知', 'bad');
+          showLib('曲库状态未知', 'bad', '控制层未就绪，无法读取曲库索引状态。');
+        });
+
+      // 曲库索引可能正在刷新，稍后再确认一次，避免一直停在「索引中」
+      clearTimeout(refreshStatus.timer);
+      refreshStatus.timer = setTimeout(function () {
+        fetch(STATUS_API, { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            var s = (d && d.data) || {};
+            var n = Number(s.song_count || 0);
+            if (s.is_refreshing) return;
+            if (s.ready && n > 0) showLib('曲库 ' + n + ' 首', 'ok');
+          })
+          .catch(function () {});
+      }, 30000);
+    }
+    // 2.1.0 起 fnmusic-ext 是可选增强：纯官方模式下给一次非阻断提示，
+    // 并把说明长期挂在两个状态胶囊的 title 上，避免把「在线歌单消失」误判成故障。
+    function refreshCapability() {
+      fetch(CAP_API, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || d.ext_available !== false) return;
+          extHint = d.ext_hint || '当前为纯本地曲库模式，在线榜单与在线音源不可用。';
+          toast(extHint);
+          refreshStatus();
+        })
+        .catch(function () {});
+    }
+    refreshStatus();
+    refreshCapability();
+  })();
+  </script>
+</body>
+</html>

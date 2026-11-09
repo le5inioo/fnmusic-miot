@@ -1,0 +1,35 @@
+#!/bin/bash
+# 安装前硬性前置检查：Node.js 运行时（应用中心）、python3、飞牛音乐曲库目录。
+# fnmusic-ext 已降为可选增强，这里只记录其状态、不阻断安装。
+# install_callback 会再校验一遍并给出更详细的错误。
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SELF_DIR}/_common"
+
+NODE_BIN="$(fnmusic_miot_find_node)"
+if [ -z "${NODE_BIN}" ]; then
+    fnmusic_miot_fail "未检测到 Node.js 运行时：请在应用中心安装 Node.js（v18 及以上）后重试"
+fi
+NODE_MAJOR="$(fnmusic_miot_node_major "${NODE_BIN}")"
+if [ "${NODE_MAJOR}" -lt 18 ]; then
+    fnmusic_miot_fail "Node.js 版本过低（${NODE_BIN} 为 v${NODE_MAJOR}）：请安装 v18 及以上版本"
+fi
+
+# 控制层用 python3 执行 scripts/fnmusic_token.py 解析飞牛音乐登录会话（纯标准库）。
+command -v python3 >/dev/null 2>&1 || fnmusic_miot_fail "未检测到 python3：控制层需要它读取飞牛音乐曲库会话"
+
+DB_DIR="${FNMUSIC_MUSIC_DB_DIR:-/usr/local/apps/@appdata/trim.music/db}"
+[ -d "${DB_DIR}" ] || fnmusic_miot_fail "未检测到飞牛音乐曲库（${DB_DIR}）：请先安装并启动飞牛音乐（trim.music）"
+
+# 可选增强：ext 接管官方 socket 后会在 /_ext/healthz 应答；官方原生接口无此端点。
+# 只写日志，缺失时按纯本地曲库模式运行，绝不阻断安装。
+if command -v curl >/dev/null 2>&1 \
+   && curl -fsS -m 2 --unix-socket /var/run/trim_music.socket \
+        http://localhost/_ext/healthz >/dev/null 2>&1; then
+    echo "[fnmusic-miot] 可选增强 fnmusic-ext 已就绪：在线榜单/在线音源可用" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+else
+    echo "[fnmusic-miot] 未检测到 fnmusic-ext：以纯本地曲库模式运行（不影响安装）" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+fi
+
+exit 0

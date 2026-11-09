@@ -1,0 +1,312 @@
+#!/bin/bash
+# Shared helpers for fnmusic-miot App Center lifecycle scripts (sourced, not run).
+# 原生部署版：不再依赖 Docker，运行期由 systemd 单元 fnmusic-miot.service 承载。
+# The sourcing script must set SELF_DIR to its own directory first.
+
+FNMUSIC_MIOT_APP_ROOT="$(cd "${SELF_DIR}/.." && pwd)"
+# cmd/ lives at <app>/cmd；仓库主体落在 <app>/repo。以 nodeconsole/server.mjs 作存在标记。
+MIOT_REPO_DIR=""
+for _cand in "${TRIM_APPDEST:-}/repo" "${FNMUSIC_MIOT_APP_ROOT}/target/repo" "${FNMUSIC_MIOT_APP_ROOT}/repo"; do
+    if [ -n "${_cand}" ] && [ -f "${_cand}/nodeconsole/server.mjs" ]; then
+        MIOT_REPO_DIR="$(cd "${_cand}" && pwd)"
+        break
+    fi
+done
+unset _cand
+
+# 应用目录必须是「已安装位置」。
+# 安装/升级期间脚本从临时解包目录（如 /vol1/appcenter-downloads/xxx-tpk）执行，
+# 那时 SELF_DIR/.. 是临时目录，用它推 appdir 会把 socket 建到临时目录里。
+# repo 探测带存在标记（nodeconsole/server.mjs），指向的才是真实安装目录，取其父目录。
+if [ -n "${MIOT_REPO_DIR}" ]; then
+    MIOT_APPDIR="$(dirname "${MIOT_REPO_DIR}")"
+else
+    MIOT_APPDIR="${FNMUSIC_MIOT_APP_ROOT}"
+fi
+MIOT_UNIT_NAME="fnmusic-miot.service"
+MIOT_UNIT_PATH="/etc/systemd/system/${MIOT_UNIT_NAME}"
+MIOT_SOCKET="${MIOT_APPDIR}/fnmusic-miot.sock"
+# 运行期数据（token / storage.json / 日志）必须放在升级不会覆盖的位置。
+# repo/ 在升级时会被新包整体替换，所以数据落 appdata/var 而不是 repo/miot-data。
+MIOT_DATA_ROOT="${TRIM_PKGVAR:-/vol1/@appdata/fnmusic-miot}/var"
+MIOT_LOG_DIR="${MIOT_DATA_ROOT}/logs"
+FNMUSIC_MIOT_LOG="${TRIM_PKGVAR:-/tmp}/fnmusic-miot.log"
+mkdir -p "$(dirname "${FNMUSIC_MIOT_LOG}")" 2>/dev/null || true
+
+# 应用中心安装失败会回滚删除 TRIM_PKGVAR，fnmusic-miot.log 会一起消失。
+# 过程输出同时追加到这份不随回滚删除的日志。
+if [ -z "${FNMUSIC_MIOT_DURABLE_LOG:-}" ]; then
+    FNMUSIC_MIOT_DURABLE_LOG="/var/log/apps/fnmusic-miot-install.log"
+    if ! { mkdir -p /var/log/apps && touch "${FNMUSIC_MIOT_DURABLE_LOG}"; } 2>/dev/null; then
+        FNMUSIC_MIOT_DURABLE_LOG="/tmp/fnmusic-miot-install.log"
+    fi
+fi
+mkdir -p "$(dirname "${FNMUSIC_MIOT_DURABLE_LOG}")" 2>/dev/null || true
+touch "${FNMUSIC_MIOT_DURABLE_LOG}" 2>/dev/null || true
+chmod a+r "${FNMUSIC_MIOT_DURABLE_LOG}" 2>/dev/null || true
+
+fnmusic_miot_fail() {
+    if [ -n "${TRIM_TEMP_LOGFILE:-}" ]; then
+        echo "$1" > "${TRIM_TEMP_LOGFILE}" || true
+    fi
+    echo "[fnmusic-miot] $1" >&2
+    exit 1
+}
+
+fnmusic_miot_error_brief() {
+    local log="${1:-${FNMUSIC_MIOT_LOG}}"
+    [ -f "${log}" ] || return 0
+    sed $'s/\x1b\\[[0-9;]*m//g' "${log}" 2>/dev/null \
+        | grep -aE '\[ERROR\]|ERROR:|(^|[^A-Za-z])E: ' \
+        | tail -n 5 \
+        | tr '\n' ' ' \
+        | cut -c1-400
+}
+
+fnmusic_miot_log_tail_brief() {
+    local log="${1:-${FNMUSIC_MIOT_LOG}}"
+    [ -f "${log}" ] || return 0
+    sed $'s/\x1b\\[[0-9;]*m//g' "${log}" 2>/dev/null \
+        | tail -n 5 \
+        | tr '\n' ' ' \
+        | cut -c1-300
+}
+
+fnmusic_miot_run_logged() {
+    local stamp rc pipefail_on=0
+    stamp="$(date '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo unknown-time)"
+    printf '\n===== %s %s =====\n' "${stamp}" "$*" >> "${FNMUSIC_MIOT_DURABLE_LOG}" 2>/dev/null || true
+    if set -o | grep -q 'pipefail[[:space:]]*on'; then
+        pipefail_on=1
+    fi
+    set +o pipefail
+    "$@" 2>&1 | tee -a "${FNMUSIC_MIOT_DURABLE_LOG}" >> "${FNMUSIC_MIOT_LOG}"
+    rc=${PIPESTATUS[0]}
+    if [ "${pipefail_on}" -eq 1 ]; then
+        set -o pipefail
+    fi
+    return "${rc}"
+}
+
+fnmusic_miot_fail_from_log() {
+    local prefix="$1" err_brief
+    err_brief="$(fnmusic_miot_error_brief)"
+    if [ -z "${err_brief}" ]; then
+        err_brief="$(fnmusic_miot_log_tail_brief)"
+    fi
+    tail -n 5 "${FNMUSIC_MIOT_LOG}" >&2 || true
+    fnmusic_miot_fail "${prefix}。日志：${FNMUSIC_MIOT_DURABLE_LOG}。${err_brief:-未捕获到错误行}"
+}
+
+# ------------------------------------------------------------------------------
+# Node 运行时探测。
+# 优先 .env 里已固定的路径（安装时写入），否则按应用商店 Node.js 的常见落点探测，
+# 最后才退回 PATH 里的 node。返回绝对路径；找不到返回空串。
+# ------------------------------------------------------------------------------
+fnmusic_miot_env_get() {
+    local key="$1" file="${MIOT_REPO_DIR}/.env"
+    [ -f "${file}" ] || return 0
+    grep -E "^[[:space:]]*(export[[:space:]]+)?${key}=" "${file}" 2>/dev/null \
+        | tail -n1 | cut -d= -f2- \
+        | sed -e "s/^['\"]//" -e "s/['\"]$//" -e 's/[[:space:]]*$//'
+}
+
+fnmusic_miot_find_node() {
+    local cand base found
+
+    cand="$(fnmusic_miot_env_get FNMUSIC_MIOT_NODE_BIN)"
+    if [ -n "${cand}" ] && [ -x "${cand}" ]; then
+        echo "${cand}"; return 0
+    fi
+
+    for cand in \
+        /vol1/@appcenter/nodejs_v22/bin/node \
+        /vol1/@appcenter/nodejs_v20/bin/node \
+        /vol1/@appcenter/nodejs_v18/bin/node \
+        /vol1/@appcenter/nodejs/bin/node \
+        /vol1/@appcenter/nodejs/target/bin/node \
+        /usr/local/apps/@appcenter/nodejs_v22/bin/node \
+        /usr/local/apps/@appcenter/nodejs/bin/node \
+        /usr/local/bin/node \
+        /usr/bin/node; do
+        if [ -x "${cand}" ]; then echo "${cand}"; return 0; fi
+    done
+
+    # 应用商店 Node.js 可能装在别处（多卷、带版本号目录）：先找 node* 命名的应用目录，
+    # 再在其中按有限深度找可执行的 node。刻意限制 maxdepth，避免扫全盘。
+    for base in /vol*/@appcenter /usr/local/apps/@appcenter; do
+        [ -d "${base}" ] || continue
+        for cand in "${base}"/node* "${base}"/*/nodejs; do
+            [ -d "${cand}" ] || continue
+            found="$(find "${cand}" -maxdepth 4 -type f -name node -perm -u+x 2>/dev/null | head -n1)"
+            if [ -n "${found}" ]; then echo "${found}"; return 0; fi
+        done
+    done
+
+    cand="$(command -v node 2>/dev/null || true)"
+    if [ -n "${cand}" ] && [ -x "${cand}" ]; then echo "${cand}"; return 0; fi
+
+    echo ""
+}
+
+# 主版本须 >= 18（用到 node: 前缀 ESM、AbortController、structuredClone、closeAllConnections）。
+fnmusic_miot_node_major() {
+    local bin="$1" ver
+    [ -x "${bin}" ] || { echo 0; return 0; }
+    ver="$("${bin}" -v 2>/dev/null | sed -n 's/^v\([0-9]\+\).*/\1/p')"
+    echo "${ver:-0}"
+}
+
+# ------------------------------------------------------------------------------
+# systemd 单元安装/移除
+# ------------------------------------------------------------------------------
+fnmusic_miot_write_unit() {
+    local node_bin="$1" tpl="${SELF_DIR}/fnmusic-miot.service.in" tmp
+    [ -f "${tpl}" ] || return 1
+    [ -n "${MIOT_REPO_DIR}" ] || return 1
+    tmp="$(mktemp 2>/dev/null || echo /tmp/fnmusic-miot.unit.$$)"
+    sed -e "s#@REPO@#${MIOT_REPO_DIR}#g" -e "s#@NODE@#${node_bin}#g" "${tpl}" > "${tmp}" || return 1
+    install -m 0644 "${tmp}" "${MIOT_UNIT_PATH}" || { rm -f "${tmp}"; return 1; }
+    rm -f "${tmp}"
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    return 0
+}
+
+fnmusic_miot_remove_unit() {
+    systemctl disable --now "${MIOT_UNIT_NAME}" >/dev/null 2>&1 || true
+    systemctl stop "${MIOT_UNIT_NAME}" >/dev/null 2>&1 || true
+    rm -f "${MIOT_UNIT_PATH}" 2>/dev/null || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    rm -f "${MIOT_SOCKET}" 2>/dev/null || true
+}
+
+fnmusic_miot_unit_active() {
+    systemctl is-active --quiet "${MIOT_UNIT_NAME}" 2>/dev/null
+}
+
+# 探测单个端口是否已接受连接。有 curl 就做 HTTP 探活，没有就退回裸 TCP 探测。
+_miot_port_ready() {
+    local port="$1"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsS -m 2 "http://127.0.0.1:${port}/health" >/dev/null 2>&1
+        return $?
+    fi
+    (exec 3<>"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1
+}
+
+# 等控制层 8775 与控制台 8776 都可用；最多 ${1:-20} 秒。
+fnmusic_miot_wait_ready() {
+    local seconds="${1:-20}" i=0
+    while [ "${i}" -lt $((seconds * 2)) ]; do
+        if _miot_port_ready 8776 && _miot_port_ready 8775; then
+            return 0
+        fi
+        i=$((i + 1))
+        sleep 0.5
+    done
+    return 1
+}
+
+# ------------------------------------------------------------------------------
+# .env 维护
+# 容器版（1.0.0）遗留的键值必须覆盖写：端口与路径语义都变了。
+# ------------------------------------------------------------------------------
+_miot_env_add() {
+    local key="$1" val="$2" file="${MIOT_REPO_DIR}/.env"
+    if ! grep -Eq "^[[:space:]]*(export[[:space:]]+)?${key}=" "${file}"; then
+        printf '%s=%s\n' "${key}" "${val}" >> "${file}"
+    fi
+}
+
+_miot_env_set() {
+    local key="$1" val="$2" file="${MIOT_REPO_DIR}/.env" tmp
+    tmp="$(mktemp 2>/dev/null || echo "${file}.tmp")"
+    grep -vE "^[[:space:]]*(export[[:space:]]+)?${key}=" "${file}" > "${tmp}" 2>/dev/null || true
+    printf '%s=%s\n' "${key}" "${val}" >> "${tmp}"
+    cat "${tmp}" > "${file}"
+    rm -f "${tmp}"
+}
+
+_miot_env_del() {
+    local key="$1" file="${MIOT_REPO_DIR}/.env" tmp
+    [ -f "${file}" ] || return 0
+    tmp="$(mktemp 2>/dev/null || echo "${file}.tmp")"
+    grep -vE "^[[:space:]]*(export[[:space:]]+)?${key}=" "${file}" > "${tmp}" 2>/dev/null || true
+    cat "${tmp}" > "${file}"
+    rm -f "${tmp}"
+}
+
+fnmusic_miot_env_setup() {
+    local env_file="${MIOT_REPO_DIR}/.env" ip="" port="6688" gw_conf="" p="" node_bin=""
+    [ -f "${env_file}" ] || : > "${env_file}"
+
+    ip="$(ip -4 -o addr show scope global 2>/dev/null \
+          | awk '{print $4}' | cut -d/ -f1 | grep -v '^127\.' | head -n1 || true)"
+    if [ -z "${ip}" ]; then
+        ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+    fi
+    gw_conf="/usr/trim/etc/network_gateway_setting.conf"
+    if [ -r "${gw_conf}" ]; then
+        p="$(sed -n 's/.*schema\.http\.port[^0-9]*\([0-9]\{2,5\}\).*/\1/p' "${gw_conf}" | head -n1 || true)"
+        [ -n "${p}" ] && port="${p}"
+    fi
+
+    node_bin="$(fnmusic_miot_find_node)"
+    [ -n "${node_bin}" ] || node_bin="/usr/bin/node"
+
+    # 覆盖写：这些键在容器版里是另一套语义（8006 / /data/miot / /fnmusic-db）。
+    _miot_env_set FNMUSIC_MIOT_APPDIR "${MIOT_APPDIR}"
+    _miot_env_set FNMUSIC_MIOT_NODE_BIN "${node_bin}"
+    _miot_env_set FNMUSIC_MIOT_DATA_ROOT "${MIOT_DATA_ROOT}"
+    _miot_env_set MIOT_HOST "0.0.0.0"
+    _miot_env_set MIOT_PORT "8775"
+    _miot_env_set MIOT_PUBLIC_PORT "8775"
+    _miot_env_set MIOT_DATA_DIR "${MIOT_DATA_ROOT}/miot"
+    _miot_env_set MIOT_ENV_FILE "${env_file}"
+    _miot_env_set MIOT_TOKEN_FILE "${MIOT_DATA_ROOT}/miot/token"
+    _miot_env_set MIOT_UPSTREAM_HOST "127.0.0.1"
+    _miot_env_set MIOT_UPSTREAM_PORT "8775"
+    _miot_env_set FNMUSIC_MIOT_SOCKET "${MIOT_SOCKET}"
+    _miot_env_set FNMUSIC_DB_PATH "/usr/local/apps/@appdata/trim.music/db/music.db"
+    # 容器版把网关 token 写进了 .env；原生版的 token 只存在 MIOT_TOKEN_FILE 里。
+    _miot_env_del MIOT_TOKEN
+
+    # 只补缺失：这些键与部署形态无关，用户可能手工改过。
+    _miot_env_add MIOT_REQUIRE_AUTH true
+    _miot_env_add MIOT_SERVER_HOST_FORCE false
+    _miot_env_add FNMUSIC_MUSIC_DB_DIR "/usr/local/apps/@appdata/trim.music/db"
+    if [ -n "${ip}" ]; then
+        _miot_env_add FNMUSIC_NAS_IP "${ip}"
+        _miot_env_add FNMUSIC_GATEWAY_PORT "${port}"
+        _miot_env_add FNMUSIC_BASE_URL "http://${ip}:${port}"
+        _miot_env_add MIOT_SERVER_HOST "http://${ip}:8775"
+    fi
+
+    mkdir -p "${MIOT_DATA_ROOT}/miot" "${MIOT_LOG_DIR}" 2>/dev/null || true
+    echo "[fnmusic-miot] 环境键已对齐 (ip=${ip:-未探测}, gateway=${port}, node=${node_bin})" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+}
+
+# ------------------------------------------------------------------------------
+# 容器版（1.0.0）数据迁移：旧数据在 <appdir>/repo/miot-data，升级会随 repo 一起消失。
+# 幂等：新位置已有 token 就直接返回。upgrade_init（删旧文件前）与
+# upgrade_callback（新文件就位后）各调一次，任一阶段命中即可。
+# ------------------------------------------------------------------------------
+fnmusic_miot_migrate_legacy_data() {
+    local cand dst="${MIOT_DATA_ROOT}/miot"
+
+    [ -f "${dst}/token" ] && return 0
+
+    for cand in \
+        "${TRIM_APPDEST:-}/repo/miot-data" \
+        "/vol1/@appcenter/fnmusic-miot/repo/miot-data" \
+        "${MIOT_APPDIR}/repo/miot-data"; do
+        [ -n "${cand}" ] && [ -d "${cand}/miot" ] || continue
+        [ -f "${cand}/miot/token" ] || continue
+        mkdir -p "${dst}" "${MIOT_LOG_DIR}" 2>/dev/null || true
+        cp -a "${cand}/miot/." "${dst}/" 2>> "${FNMUSIC_MIOT_LOG}" || true
+        [ -d "${cand}/logs" ] && cp -a "${cand}/logs/." "${MIOT_LOG_DIR}/" 2>> "${FNMUSIC_MIOT_LOG}" || true
+        echo "[fnmusic-miot] 已迁移容器版数据 ${cand} -> ${MIOT_DATA_ROOT}" >> "${FNMUSIC_MIOT_LOG}"
+        return 0
+    done
+    return 0
+}

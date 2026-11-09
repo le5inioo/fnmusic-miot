@@ -1,0 +1,4 @@
+#!/bin/bash
+# No config UI for fnmusic-miot.
+set -uo pipefail
+exit 0

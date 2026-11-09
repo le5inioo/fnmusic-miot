@@ -1,0 +1,50 @@
+#!/bin/bash
+# 升级后：先停旧单元（可能是容器版残留），刷新 .env、重写单元、再启动探活。
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SELF_DIR}/_common"
+
+[ -n "${MIOT_REPO_DIR}" ] || fnmusic_miot_fail "应用文件缺失（nodeconsole/server.mjs 不存在）"
+
+# 1.0.0 容器版可能还留着容器与旧 compose 进程，先清掉，避免抢 8775/8776。
+systemctl stop "${MIOT_UNIT_NAME}" >/dev/null 2>&1 || true
+if command -v docker >/dev/null 2>&1; then
+    docker rm -f fnmusic-miot >/dev/null 2>&1 || true
+fi
+
+[ -f "${MIOT_REPO_DIR}/.env" ] || : > "${MIOT_REPO_DIR}/.env"
+fnmusic_miot_env_setup
+
+NODE_BIN="$(fnmusic_miot_find_node)"
+[ -n "${NODE_BIN}" ] || fnmusic_miot_fail "未检测到 Node.js 运行时：请在应用中心安装 Node.js（v18 及以上）后重试"
+
+mkdir -p "${MIOT_DATA_ROOT}/miot" "${MIOT_LOG_DIR}" 2>/dev/null || true
+chmod 0755 "${MIOT_REPO_DIR}" 2>/dev/null || true
+
+# upgrade_init 已搬过一次；这里再兜一次（防 appcenter 跳过 init 直接走 callback）。
+fnmusic_miot_migrate_legacy_data
+
+if ! fnmusic_miot_write_unit "${NODE_BIN}"; then
+    fnmusic_miot_fail "写入 systemd 单元失败（${MIOT_UNIT_PATH}）"
+fi
+systemctl enable "${MIOT_UNIT_NAME}" >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+
+if ! fnmusic_miot_run_logged systemctl restart "${MIOT_UNIT_NAME}"; then
+    journalctl -u "${MIOT_UNIT_NAME}" -n 15 --no-pager >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+    fnmusic_miot_fail_from_log "升级失败"
+fi
+
+if ! fnmusic_miot_wait_ready 30; then
+    journalctl -u "${MIOT_UNIT_NAME}" -n 20 --no-pager >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+    fnmusic_miot_fail_from_log "升级失败：控制层(8775)或控制台(8776)未在 30 秒内就绪"
+fi
+
+echo "[fnmusic-miot] 升级完成 node=${NODE_BIN}" >> "${FNMUSIC_MIOT_LOG}"
+
+# 1.0.0 容器版的镜像已无用处（752 MB），服务起来后再回收，不影响升级结果。
+if command -v docker >/dev/null 2>&1; then
+    docker rmi -f fnmusic-miot:latest >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+fi
+
+exit 0

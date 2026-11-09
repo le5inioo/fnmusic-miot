@@ -1,0 +1,24 @@
+{
+  "name": "fnmusic-ext-miot-service",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "songloft-plugin-miot running as fnmusic-ext's speaker control layer, with FeiNiu Music as the library",
+  "scripts": {
+    "build": "node build.mjs",
+    "build:panel": "npm install --prefix frontend --no-audit --no-fund && npm run build --prefix frontend",
+    "build:all": "node build.mjs && npm run build:panel",
+    "start": "node host/index.mjs",
+    "check": "node --check host/index.mjs && node --check host/server.mjs"
+  },
+  "devDependencies": {
+    "@songloft/plugin-sdk": "2.18.0",
+    "esbuild": "^0.25.12",
+    "pako": "1.0.11",
+    "typescript": "^5.9.3",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

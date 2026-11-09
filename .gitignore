@@ -1,0 +1,35 @@
+# ── 依赖 ──────────────────────────────────────────────
+node_modules/
+
+# ── 构建产物（由 `npm run build:all` 重新生成）─────────
+miot-service/bundle/
+miot-service/frontend/dist/
+miot-service/static/
+# 注意：fpk 打包时需要 static/ 与 bundle/ 已存在；
+#       从干净克隆构建时先跑 `npm run build:all`。
+
+# ── 遗留目录（原生架构已弃用，不纳入开源版）────────────
+container/
+webui/
+__pycache__/
+*.pyc
+docker-compose.yml
+.dockerignore
+
+# ── 环境与密钥 ───────────────────────────────────────
+.env
+.env.*
+*.local
+nodeconsole/.env
+
+# ── 操作系统 / 编辑器 ────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
+
+# ── fpk 打包产物 ────────────────────────────────────
+packaging/fpk/.build/
+*.fpk
+*.fpk.sha256

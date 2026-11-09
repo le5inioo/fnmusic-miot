@@ -1,0 +1,288 @@
+/* =============================================================================
+ * fnmusic-miot · 控制面板主题层（独立运行版）
+ * -----------------------------------------------------------------------------
+ * 背景：面板 CSS（style.css）里所有颜色/圆角/阴影都写成 var(--md-*)，
+ *       原本由宿主（fnmusic-ext / Songloft 主程序）注入 Material 3 token。
+ *       拆成独立 fpk 后宿主不在了，这 38 个变量全部未定义，且 style.css 里
+ *       没有任何 var(..., fallback) 兜底 —— 于是 background 失效成透明、
+ *       color 继承成黑色、border-radius 归零，就是「纯白底 + 黑字」的观感。
+ *
+ * 这个文件只补 token，不改 style.css 的任何选择器，因此：
+ *   · 不破坏组件结构，升级上游前端也不冲突；
+ *   · 亮/暗两套 + 圆角/阴影/玻璃材质，一次性让面板回到设计稿该有的样子。
+ *
+ * 取值遵循 Material 3 语义：surface 系列 = 背景层次，on-* = 该层上的文字色，
+ * container = 卡片/容器填充。自定义品牌色为「紫罗兰」主色，贴合音乐/音箱气质。
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------- 亮色（默认） */
+:root {
+  color-scheme: light;
+
+  /* 主色 —— 品牌紫罗兰 */
+  --md-primary: #5a4be0;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #e5e1ff;
+  --md-on-primary-container: #1b0f63;
+  --md-surface-tint: #5a4be0;
+
+  /* 次要色 —— 用于选中态胶囊、次级标签 */
+  --md-secondary: #5f5b74;
+  --md-on-secondary: #ffffff;
+  --md-secondary-container: #e6e3f7;
+  --md-on-secondary-container: #2c2942;
+
+  /* 第三色 —— 播放器「活力色」取样基准 */
+  --md-tertiary: #9a4a9e;
+  --md-on-tertiary: #ffffff;
+  --md-tertiary-container: #ffd8f5;
+  --md-on-tertiary-container: #3a0038;
+
+  /* 背景层次：surface 最底 → container-highest 最高（浮层/悬浮卡片） */
+  --md-surface: #faf9fe;
+  --md-surface-variant: #e4e1ec;
+  --md-on-surface: #1b1b21;
+  --md-on-surface-variant: #56535f;
+  --md-surface-container-lowest: #ffffff;
+  --md-surface-container-low: #f4f3fa;
+  --md-surface-container: #f0eef7;
+  --md-surface-container-high: #eae8f2;
+  --md-surface-container-highest: #e4e1ed;
+
+  /* 描边：outline 用于输入框/控件边界，outline-variant 用于分隔线与卡片描边 */
+  --md-outline: #78757f;
+  --md-outline-variant: #cbc8d4;
+
+  /* 反色（Toast / 底部条） */
+  --md-inverse-surface: #303036;
+  --md-on-inverse-surface: #f3f0f7;
+  --md-inverse-primary: #c3baff;
+
+  /* 语义色 */
+  --md-error: #b3261e;
+  --md-on-error: #ffffff;
+  --md-error-container: #f9dedc;
+  --md-on-error-container: #410e0b;
+  --md-success: #1c6f45;
+  --md-success-container: #d3f2e0;
+  --md-on-success-container: #07301c;
+  --md-warning: #7d5a00;
+  --md-warning-container: #ffe7bd;
+  --md-on-warning-container: #3a2900;
+
+  /* 圆角梯度 */
+  --md-radius-sm: 8px;
+  --md-radius-md: 12px;
+  --md-radius-lg: 16px;
+  --md-radius-xl: 24px;
+  --md-radius-full: 999px;
+
+  /* 阴影梯度（冷调中性投影，比纯黑更贴合浅灰底） */
+  --md-shadow-1: 0 1px 2px rgba(24, 26, 48, .06), 0 1px 3px rgba(24, 26, 48, .07);
+  --md-shadow-2: 0 2px 4px rgba(24, 26, 48, .06), 0 6px 16px rgba(24, 26, 48, .09);
+  --md-shadow-3: 0 6px 18px rgba(24, 26, 48, .10), 0 18px 44px rgba(24, 26, 48, .13);
+
+  /* 宿主接口：面板的播放条 / 导航 / 卡片会读这几个变量 */
+  --sl-safe-top: 0px;
+  --sl-safe-bottom: 0px;
+  --sl-theme-card-radius: var(--md-radius-lg);
+  --sl-theme-control-radius: var(--md-radius-md);
+  --sl-theme-navigation-radius: var(--md-radius-lg);
+  --sl-theme-glass-fill: rgba(250, 249, 254, .74);
+  --sl-theme-glass-border: rgba(27, 27, 33, .08);
+  --sl-theme-player-gradient: linear-gradient(
+    180deg,
+    rgba(250, 249, 254, 0) 0%,
+    rgba(250, 249, 254, .88) 62%,
+    rgba(250, 249, 254, .97) 100%
+  );
+}
+
+/* ---------------------------------------------------------------- 暗色（手动切换） */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --md-primary: #c3baff;
+  --md-on-primary: #291b8f;
+  --md-primary-container: #3d2cba;
+  --md-on-primary-container: #e5e1ff;
+  --md-surface-tint: #c3baff;
+
+  --md-secondary: #c8c3dd;
+  --md-on-secondary: #302d45;
+  --md-secondary-container: #3a3752;
+  --md-on-secondary-container: #e6e1f9;
+
+  --md-tertiary: #f2b2e8;
+  --md-on-tertiary: #551050;
+  --md-tertiary-container: #6f2a6b;
+  --md-on-tertiary-container: #ffd8f5;
+
+  --md-surface: #111116;
+  --md-surface-variant: #46434f;
+  --md-on-surface: #e6e2ee;
+  --md-on-surface-variant: #b6b2c1;
+  --md-surface-container-lowest: #0c0c11;
+  --md-surface-container-low: #19181f;
+  --md-surface-container: #1d1c24;
+  --md-surface-container-high: #282631;
+  --md-surface-container-highest: #33313c;
+
+  --md-outline: #8e8a9b;
+  --md-outline-variant: #45424f;
+
+  --md-inverse-surface: #e6e2ee;
+  --md-on-inverse-surface: #2f2e36;
+  --md-inverse-primary: #5a4be0;
+
+  --md-error: #ffb4ab;
+  --md-on-error: #690005;
+  --md-error-container: #8d1a15;
+  --md-on-error-container: #ffdad6;
+  --md-success: #86e3ae;
+  --md-success-container: #14452c;
+  --md-on-success-container: #c4f5d8;
+  --md-warning: #ffd08a;
+  --md-warning-container: #4a3600;
+  --md-on-warning-container: #ffe7bd;
+
+  --md-shadow-1: 0 1px 2px rgba(0, 0, 0, .45), 0 1px 3px rgba(0, 0, 0, .35);
+  --md-shadow-2: 0 2px 6px rgba(0, 0, 0, .45), 0 8px 20px rgba(0, 0, 0, .40);
+  --md-shadow-3: 0 8px 22px rgba(0, 0, 0, .52), 0 20px 48px rgba(0, 0, 0, .48);
+
+  --sl-theme-glass-fill: rgba(24, 23, 30, .74);
+  --sl-theme-glass-border: rgba(255, 255, 255, .10);
+  --sl-theme-player-gradient: linear-gradient(
+    180deg,
+    rgba(17, 17, 22, 0) 0%,
+    rgba(17, 17, 22, .86) 62%,
+    rgba(17, 17, 22, .97) 100%
+  );
+}
+
+/* ------------------------------------------- 跟随系统（未手动指定主题时生效） */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
+    color-scheme: dark;
+
+    --md-primary: #c3baff;
+    --md-on-primary: #291b8f;
+    --md-primary-container: #3d2cba;
+    --md-on-primary-container: #e5e1ff;
+    --md-surface-tint: #c3baff;
+
+    --md-secondary: #c8c3dd;
+    --md-on-secondary: #302d45;
+    --md-secondary-container: #3a3752;
+    --md-on-secondary-container: #e6e1f9;
+
+    --md-tertiary: #f2b2e8;
+    --md-on-tertiary: #551050;
+    --md-tertiary-container: #6f2a6b;
+    --md-on-tertiary-container: #ffd8f5;
+
+    --md-surface: #111116;
+    --md-surface-variant: #46434f;
+    --md-on-surface: #e6e2ee;
+    --md-on-surface-variant: #b6b2c1;
+    --md-surface-container-lowest: #0c0c11;
+    --md-surface-container-low: #19181f;
+    --md-surface-container: #1d1c24;
+    --md-surface-container-high: #282631;
+    --md-surface-container-highest: #33313c;
+
+    --md-outline: #8e8a9b;
+    --md-outline-variant: #45424f;
+
+    --md-inverse-surface: #e6e2ee;
+    --md-on-inverse-surface: #2f2e36;
+    --md-inverse-primary: #5a4be0;
+
+    --md-error: #ffb4ab;
+    --md-on-error: #690005;
+    --md-error-container: #8d1a15;
+    --md-on-error-container: #ffdad6;
+    --md-success: #86e3ae;
+    --md-success-container: #14452c;
+    --md-on-success-container: #c4f5d8;
+    --md-warning: #ffd08a;
+    --md-warning-container: #4a3600;
+    --md-on-warning-container: #ffe7bd;
+
+    --md-shadow-1: 0 1px 2px rgba(0, 0, 0, .45), 0 1px 3px rgba(0, 0, 0, .35);
+    --md-shadow-2: 0 2px 6px rgba(0, 0, 0, .45), 0 8px 20px rgba(0, 0, 0, .40);
+    --md-shadow-3: 0 8px 22px rgba(0, 0, 0, .52), 0 20px 48px rgba(0, 0, 0, .48);
+
+    --sl-theme-glass-fill: rgba(24, 23, 30, .74);
+    --sl-theme-glass-border: rgba(255, 255, 255, .10);
+    --sl-theme-player-gradient: linear-gradient(
+      180deg,
+      rgba(17, 17, 22, 0) 0%,
+      rgba(17, 17, 22, .86) 62%,
+      rgba(17, 17, 22, .97) 100%
+    );
+  }
+}
+
+/* =============================================================================
+ * 基础层润色（只作用于文档级元素，不碰组件选择器）
+ * ========================================================================== */
+
+html {
+  background: var(--md-surface);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  /* 主题切换时颜色平滑过渡，避免亮暗切换「闪一下」 */
+  transition: background-color .22s ease, color .22s ease;
+}
+
+/* 选中态跟品牌色走 */
+::selection {
+  background: color-mix(in srgb, var(--md-primary) 26%, transparent);
+  color: var(--md-on-surface);
+}
+
+/* 细滚动条：默认的粗灰条在浅色卡片上很突兀 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--md-outline-variant) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--md-outline-variant);
+  border: 3px solid transparent;
+  border-radius: var(--md-radius-full);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--md-outline);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+/* 尊重系统的「减少动态效果」设置 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+/* 焦点环统一用品牌色，键盘操作时清晰可见、鼠标点击不打扰 */
+:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+
+/* 原生表单控件跟随主题（暗色下下拉框不再白底） */
+input, select, textarea, button {
+  color-scheme: inherit;
+}

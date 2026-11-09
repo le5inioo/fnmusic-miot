@@ -1,0 +1,34 @@
+#!/bin/bash
+# 卸载前：保留用户数据副本，停用并移除 systemd 单元与网关 socket。
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SELF_DIR}/_common"
+
+# 保留数据（token / storage.json / 日志）到持久目录，重装时自动沿用。
+if [ -d "${MIOT_DATA_ROOT}/miot" ] && [ -f "${MIOT_DATA_ROOT}/miot/token" ]; then
+    VOL="$(readlink -f "${FNMUSIC_MIOT_APP_ROOT}/target" 2>/dev/null | sed -n 's#^\(/vol[0-9]\+/\).*#\1#p')"
+    [ -n "${VOL}" ] || VOL="$(readlink -f "${MIOT_DATA_ROOT}" 2>/dev/null | sed -n 's#^\(/vol[0-9]\+/\).*#\1#p')"
+    VOL="${VOL:-/vol1/}"
+    case "${VOL}" in
+        */) ;;
+        *) VOL="${VOL}/" ;;
+    esac
+    KEEP_DIR="${FNMUSIC_MIOT_KEEP_DIR:-${VOL}fnmusic-miot-data}"
+    mkdir -p "${KEEP_DIR}" 2>/dev/null || true
+    if [ -d "${KEEP_DIR}" ]; then
+        cp -a "${MIOT_DATA_ROOT}/miot/." "${KEEP_DIR}/" 2>> "${FNMUSIC_MIOT_LOG}" || true
+        echo "[fnmusic-miot] 运行数据已保留至 ${KEEP_DIR}" >> "${FNMUSIC_MIOT_LOG}"
+    fi
+fi
+
+# 先摘单元再删文件：应用中心随后会删掉整个应用目录。
+fnmusic_miot_remove_unit
+
+# 容器版升级上来的，可能还残留容器与镜像。
+if command -v docker >/dev/null 2>&1; then
+    docker rm -f fnmusic-miot >/dev/null 2>&1 || true
+    docker rmi fnmusic-miot:latest >/dev/null 2>&1 || true
+fi
+
+exit 0

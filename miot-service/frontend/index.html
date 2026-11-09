@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <link rel="icon" type="image/svg+xml" href="./icon.svg" />
+    <title>Miot小爱音箱</title>
+
+    <!-- 主题引导：在样式表之前定好 data-theme，避免暗色用户先闪一帧亮色。 -->
+    <script>
+      (function () {
+        var KEY = 'fnmusic.miot.theme';
+        var root = document.documentElement;
+        var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+        function stored() { try { return localStorage.getItem(KEY); } catch (e) { return null; } }
+        function resolve() {
+          var s = stored();
+          if (s === 'light' || s === 'dark') return s;
+          return mq && mq.matches ? 'dark' : 'light';
+        }
+        function apply() { root.setAttribute('data-theme', resolve()); }
+        apply();
+        if (mq) {
+          var onChange = function () {
+            var s = stored();
+            if (!s || s === 'auto') apply();
+          };
+          if (mq.addEventListener) mq.addEventListener('change', onChange);
+          else if (mq.addListener) mq.addListener(onChange);
+        }
+        window.addEventListener('storage', function (e) {
+          if (!e || e.key === KEY || e.key === null) apply();
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <!-- 主题 token 由 src/style.css 顶部 @import './styles/theme.css' 内联进产物，
+         因此这里不需要额外的 <link>。 -->
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

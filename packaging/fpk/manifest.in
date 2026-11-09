@@ -1,0 +1,13 @@
+appname               = fnmusic-miot
+version               = @VERSION@
+display_name          = Miot小爱音箱
+desc                  = 小米/红米智能音箱独立控制层：设备管理、语音口令、播放控制、DLNA 投放。原生运行，不使用 Docker；控制台与桌面网关经应用自带 socket 接入。直接依赖飞牛音乐（trim.music）与 Node.js 运行时（应用中心可装）；fnmusic-ext 为可选增强，安装后可用在线榜单/在线音源，未安装时自动降级为纯本地曲库模式。
+platform              = all
+source                = thirdparty
+maintainer            = WorkBuddy
+maintainer_url        = https://github.com/javycoder/fnos_music_ext
+os_min_version        = 1.2.0
+desktop_uidir         = ui
+desktop_applaunchname = fnmusic-miot.main
+checkport             = false
+micro_app             = true

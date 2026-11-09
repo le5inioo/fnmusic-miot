@@ -1,0 +1,4 @@
+#!/bin/bash
+# Nothing extra after the container is removed; appcenter deletes the app dir.
+set -uo pipefail
+exit 0

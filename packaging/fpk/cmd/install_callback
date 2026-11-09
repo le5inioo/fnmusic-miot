@@ -1,0 +1,39 @@
+#!/bin/bash
+# 应用文件落盘后：写 .env → 建数据目录 → 写 systemd 单元 → 启动并探活。
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SELF_DIR}/_common"
+
+[ -n "${MIOT_REPO_DIR}" ] || fnmusic_miot_fail "应用文件缺失（nodeconsole/server.mjs 不存在）"
+
+# 全新安装时 .env 不存在则创建空文件；覆盖安装时保留既有用户键，只补/覆盖部署相关键。
+[ -f "${MIOT_REPO_DIR}/.env" ] || : > "${MIOT_REPO_DIR}/.env"
+fnmusic_miot_env_setup
+
+NODE_BIN="$(fnmusic_miot_find_node)"
+[ -n "${NODE_BIN}" ] || fnmusic_miot_fail "未检测到 Node.js 运行时：请在应用中心安装 Node.js（v18 及以上）后重试"
+
+mkdir -p "${MIOT_DATA_ROOT}/miot" "${MIOT_LOG_DIR}" 2>/dev/null || true
+chmod 0755 "${MIOT_REPO_DIR}" 2>/dev/null || true
+
+if ! fnmusic_miot_write_unit "${NODE_BIN}"; then
+    fnmusic_miot_remove_unit
+    fnmusic_miot_fail "写入 systemd 单元失败（${MIOT_UNIT_PATH}）"
+fi
+systemctl enable "${MIOT_UNIT_NAME}" >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+
+if ! fnmusic_miot_run_logged systemctl restart "${MIOT_UNIT_NAME}"; then
+    journalctl -u "${MIOT_UNIT_NAME}" -n 15 --no-pager >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+    fnmusic_miot_remove_unit
+    fnmusic_miot_fail_from_log "安装失败"
+fi
+
+if ! fnmusic_miot_wait_ready 30; then
+    journalctl -u "${MIOT_UNIT_NAME}" -n 20 --no-pager >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+    fnmusic_miot_remove_unit
+    fnmusic_miot_fail_from_log "安装失败：控制层(8775)或控制台(8776)未在 30 秒内就绪"
+fi
+
+echo "[fnmusic-miot] 安装完成 node=${NODE_BIN} unit=${MIOT_UNIT_NAME}" >> "${FNMUSIC_MIOT_LOG}"
+exit 0
