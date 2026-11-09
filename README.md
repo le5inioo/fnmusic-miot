@@ -24,6 +24,13 @@
 
 控制层经本机 `trim_music` unix socket 读写飞牛音乐 API；面板经 8776 网关与 8775 控制层通信，token 由服务端注入，浏览器不持有。
 
+## 上游项目
+
+本项目基于上游开源项目 **[songloft-org/songloft-plugin-miot](https://github.com/songloft-org/songloft-plugin-miot)** 衍生而来，复用了其 miot 控制层的核心思路与协议适配，并针对 fnOS（飞牛音乐）做了原生运行化改造（去 Docker、去 Python 依赖、接入飞牛音乐搜索与取流）。
+
+- 上游仓库：<https://github.com/songloft-org/songloft-plugin-miot>
+- 若你希望使用通用（非飞牛音乐定制）的小爱音箱控制方案，请直接参考上游项目。
+
 ## 依赖
 
 - **必需**：飞牛音乐（`trim.music`）本体 + Node.js v20+（fnOS 应用商店可装）
@@ -56,4 +63,4 @@ npm run build:all
 
 ## 开源协议
 
-[MIT](./LICENSE)。本项目的前身参考 `songloft-org/songloft-plugin-miot` 的控制层思路。
+[MIT](./LICENSE)。
