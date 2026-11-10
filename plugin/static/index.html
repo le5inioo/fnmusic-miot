@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Miot小爱音箱</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    #frame { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+    #hint {
+      position: fixed; inset: 0; display: none; place-items: center; text-align: center;
+      color: #ddd; font: 14px/1.6 system-ui, -apple-system, "PingFang SC", sans-serif; padding: 24px;
+    }
+    #hint.show { display: grid; }
+    #hint a { color: #4ea1ff; }
+  </style>
+</head>
+<body>
+  <iframe id="frame" src="http://127.0.0.1:8776/" allow="autoplay; encrypted-media; fullscreen"></iframe>
+  <div id="hint">
+    <div>
+      未能加载控制面板。<br />
+      请确认 <b>fnmusic-miot 原生应用</b> 已在 fnOS 应用中心安装并处于运行状态（它提供 8776 面板与 8775 控制层）。<br />
+      面板地址：<a href="http://127.0.0.1:8776/" target="_blank" rel="noopener">http://127.0.0.1:8776/</a>
+    </div>
+  </div>
+  <script>
+    // 若 8 秒内 iframe 未成功加载（原生应用未运行 / WebView 拦截 localhost），给出提示。
+    var ok = false;
+    var f = document.getElementById('frame');
+    try {
+      f.addEventListener('load', function () { ok = true; });
+      f.addEventListener('error', function () { document.getElementById('hint').classList.add('show'); });
+    } catch (e) {}
+    setTimeout(function () {
+      if (!ok) document.getElementById('hint').classList.add('show');
+    }, 8000);
+  </script>
+</body>
+</html>

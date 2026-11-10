@@ -55,6 +55,36 @@ npm run build:all
 
 `bundle/` 与 `static/` 为构建产物，已被 `.gitignore` 忽略；fpk 打包前需先执行上述构建。
 
+## 在飞牛音乐内嵌控制页（薄壳插件）
+
+除了独立 app 入口，本项目还提供一个 **songloft 薄壳插件**，让控制页直接出现在飞牛音乐 app 内（宿主以 WebView 渲染 `plugin.json` 声明的 `entryPath` 页面）。
+
+> 设计要点：插件本身**不实现任何音箱控制逻辑**。它只是一个壳——WebView 入口页（`plugin/static/index.html`）以全屏 iframe 加载同机运行的 **fnmusic-miot 原生应用**面板（nodeconsole `:8776` / 控制层 `:8775`）。真正的控制仍由原生应用提供。这样既能"嵌进飞牛音乐"，又不必把整套控制栈迁回 QuickJS 宿主、保住"原生运行、不依赖 Docker"的特性。
+
+目录结构：
+
+| 文件 | 作用 |
+|---|---|
+| `plugin/plugin.json` | 插件清单（`entryPath=fnmusic-miot`、`renderEngine=webview`、`main=main.js`） |
+| `plugin/main.js` | 薄壳入口，仅满足宿主生命周期契约（`onInit`/`onHTTPRequest` 等），无后端逻辑 |
+| `plugin/static/index.html` | WebView 入口页，全屏 iframe 加载原生面板 `http://127.0.0.1:8776/` |
+| `plugin/static/icon.svg` | 插件图标 |
+
+构建插件包（纯 Node，无需联网安装 `@songloft/plugin-builder`）：
+
+```bash
+node scripts/build-plugin.mjs
+# 产出：plugin/dist/fnmusic-miot.jsplugin.zip（已自动计算 entryHash / zipHash）
+```
+
+安装：飞牛音乐客户端 → 插件 → 从文件安装 → 选择 `plugin/dist/fnmusic-miot.jsplugin.zip`。
+
+**前置依赖**：fnmusic-miot 原生应用（fpk）必须已在 fnOS 应用中心安装并处于运行状态，否则插件页会显示"未能加载控制面板"的提示。
+
+注意事项：
+- WebView 能否加载 `http://127.0.0.1:8776` 取决于飞牛音乐客户端的 WebView 策略；若被拦截，备选方案是让 `main.js` 在 `onHTTPRequest` 中做反向代理（页面对齐到同源 `/api/v1/jsplugin/fnmusic-miot/...`，由 `main.js` 转发到 `127.0.0.1:8775`），或把面板直接编译进 `plugin/static/`。
+- 插件包与 fpk 安装包**并存**：fpk 是功能本体，插件只是它的"飞牛音乐内入口"。
+
 ## 配置
 
 - 语音口令、设备绑定、播放偏好等均在控制台 UI 内配置，持久化于应用数据目录

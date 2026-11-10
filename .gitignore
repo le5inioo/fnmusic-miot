@@ -33,3 +33,7 @@ Thumbs.db
 packaging/fpk/.build/
 *.fpk
 *.fpk.sha256
+
+# ── songloft 插件（薄壳）打包产物 ────────────────────
+plugin/dist/
+*.jsplugin.zip
