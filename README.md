@@ -55,11 +55,13 @@ npm run build:all
 
 `bundle/` 与 `static/` 为构建产物，已被 `.gitignore` 忽略；fpk 打包前需先执行上述构建。
 
-## 在飞牛音乐内嵌控制页（薄壳插件）
+## Songloft 薄壳插件（控制页入口）
 
-除了独立 app 入口，本项目还提供一个 **songloft 薄壳插件**，让控制页直接出现在飞牛音乐 app 内（宿主以 WebView 渲染 `plugin.json` 声明的 `entryPath` 页面）。
+本项目额外提供一个 **songloft 薄壳插件**，让控制页出现在 **Songloft** 应用内（宿主以 WebView 渲染 `plugin.json` 声明的 `entryPath` 页面）。
 
-> 设计要点：插件本身**不实现任何音箱控制逻辑**。它只是一个壳——WebView 入口页（`plugin/static/index.html`）以全屏 iframe 加载同机运行的 **fnmusic-miot 原生应用**面板（nodeconsole `:8776` / 控制层 `:8775`）。真正的控制仍由原生应用提供。这样既能"嵌进飞牛音乐"，又不必把整套控制栈迁回 QuickJS 宿主、保住"原生运行、不依赖 Docker"的特性。
+> ⚠️ 适用范围说明：该插件是 **Songloft** 的插件格式（`.jsplugin.zip`），**不是飞牛音乐的插件**，因此它渲染在 **Songloft 的界面内**，并不会出现在飞牛音乐 app 中。若你的目标是"在飞牛音乐 app 内加播放页"，本插件**无法直接满足**——飞牛音乐目前没有可嵌入自定义 UI 页面的插件机制（其"扩展与插件"限于歌词 / 封面 / 解码等功能性扩展，以及 fnmusic-ext 这类独立 fpk 应用）。本插件仅适用于你同时运行 **Songloft** 的场景。
+
+> 设计要点：插件本身**不实现任何音箱控制逻辑**。它只是一个壳——WebView 入口页（`plugin/static/index.html`）以全屏 iframe 加载同机运行的 **fnmusic-miot 原生应用**面板（nodeconsole `:8776` / 控制层 `:8775`）。真正的控制仍由原生应用提供。这样既能复用原生能力，又不必把整套控制栈迁回 QuickJS 宿主。
 
 目录结构：
 
@@ -77,13 +79,19 @@ node scripts/build-plugin.mjs
 # 产出：plugin/dist/fnmusic-miot.jsplugin.zip（已自动计算 entryHash / zipHash）
 ```
 
-安装：飞牛音乐客户端 → 插件 → 从文件安装 → 选择 `plugin/dist/fnmusic-miot.jsplugin.zip`。
+### 安装（在 Songloft 后台，非飞牛音乐）
+
+1. 确保 fnmusic-miot 原生应用（fpk）已在 fnOS 应用中心安装并运行；
+2. 打开 **Songloft 后台**（`http://<NAS>:<Songloft端口>`，默认如 `:58091`）→ `设置` → `扩展`（或 `JS 插件管理`）；
+3. 点击 **上传插件**，选择 `plugin/dist/fnmusic-miot.jsplugin.zip`（**不要解压**）；
+4. 上传后自动安装，回到 Songloft 首页即可看到「fnmusic-miot」入口，点击进入即控制页。
+   - 也可通过插件商店的订阅源安装（需提供 `registry.json`）。
 
 **前置依赖**：fnmusic-miot 原生应用（fpk）必须已在 fnOS 应用中心安装并处于运行状态，否则插件页会显示"未能加载控制面板"的提示。
 
 注意事项：
-- WebView 能否加载 `http://127.0.0.1:8776` 取决于飞牛音乐客户端的 WebView 策略；若被拦截，备选方案是让 `main.js` 在 `onHTTPRequest` 中做反向代理（页面对齐到同源 `/api/v1/jsplugin/fnmusic-miot/...`，由 `main.js` 转发到 `127.0.0.1:8775`），或把面板直接编译进 `plugin/static/`。
-- 插件包与 fpk 安装包**并存**：fpk 是功能本体，插件只是它的"飞牛音乐内入口"。
+- WebView 能否加载 `http://127.0.0.1:8776` 取决于 Songloft 客户端（Web / App）的 WebView 策略；若被拦截，备选方案是让 `main.js` 在 `onHTTPRequest` 中做反向代理（页面对齐到同源 `/api/v1/jsplugin/fnmusic-miot/...`，由 `main.js` 转发到 `127.0.0.1:8775`），或把面板直接编译进 `plugin/static/`。
+- 插件包与 fpk 安装包**并存**：fpk 是功能本体，插件只是它在 **Songloft 内的入口**。
 
 ## 配置
 
