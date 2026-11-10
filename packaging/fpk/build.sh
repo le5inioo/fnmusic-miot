@@ -73,6 +73,8 @@ mkdir -p "${STAGE}/app/repo" "${STAGE}/app/ui"
 # 原生部署（2.0.0 起）不再需要容器：container/、docker-compose.yml 与旧 Python 版
 # webui/ 一并排除，只保留 nodeconsole/（控制台网关）与 runtime/（进程守护）。
 # .env 是安装时由安装脚本生成的，不进包。
+# 已废弃的 Songloft 薄壳插件（plugin/ + scripts/build-plugin.mjs）也显式排除，
+# 即使源码树里被误恢复，也不会混进正式包。
 rsync -a --delete \
     --exclude='.env' --exclude='.env.*' \
     --exclude='.git/' --exclude='.git*' \
@@ -85,6 +87,7 @@ rsync -a --delete \
     --exclude='container/' --exclude='docker-compose.yml' --exclude='.dockerignore' \
     --exclude='webui/' \
     --exclude='miot-data/' \
+    --exclude='plugin/' --exclude='scripts/build-plugin.mjs' \
     --exclude='*.sock' \
     --exclude='**/node_modules/' --exclude='*.fpk' \
     "${REPO_ROOT}/" "${STAGE}/app/repo/"
