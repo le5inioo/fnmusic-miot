@@ -31,12 +31,40 @@ export function createCompatHandler({ fn, music, cfg, log, storage }) {
           headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
           body: JSON.stringify(payload),
         });
-        if (url.searchParams.get('access_token') !== cfg.token) return json(401, { error: 'unauthorized' });
+        // 面板搜索经 nodeconsole 同源反代访问，令牌由网关以 Authorization: Bearer 注入；
+        // 原来的 ?access_token= 诊断方式继续保留。两者都不把只读搜索开放给未授权访问。
+        const bearer = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '').trim();
+        const authorized = url.searchParams.get('access_token') === cfg.token || bearer === cfg.token;
+        if (!authorized) return json(401, { error: 'unauthorized' });
         const q = String(url.searchParams.get('q') || '').trim().slice(0, 60);
         if (!q) return json(400, { error: 'q is required' });
+        // full=1 给面板搜索用：返回完整候选（含可直接下发给音箱的播放 URL），
+        // 不带 full 时仍是原来只回前 5 条的轻量诊断输出。
+        const full = url.searchParams.get('full') === '1';
         try {
           const rows = await music.searchSongs(q);
           const extAvailable = typeof fn.detectExt === 'function' ? await fn.detectExt() : true;
+          // play_url 与 URLBuilder.buildSongURL 同构：serverHost + /api/v1/songs/:id/play
+          // + access_token。searchSongs() 里的 register() 已建立 id -> guid 映射，
+          // 因此复用上午语音点播验证过的取流链路，不导入曲库、不需要额外搜索源。
+          const hostBase = String(cfg.serverHost || '').replace(/\/$/, '');
+          const songs = full ? rows.map((s) => {
+            const rel = String(s.url || '');
+            const sep = rel.includes('?') ? '&' : '?';
+            return {
+              id: s.id,
+              // 在线音源标题带 [lx-xx] 来源前缀，展示时剥掉（打分逻辑同样处理）。
+              title: String(s.title || '').replace(/^\[[^\]]+\]\s*/, ''),
+              artist: s.artist || '',
+              album: s.album || '',
+              duration: Number(s.duration || 0),
+              is_online: !!s.is_online,
+              cover_url: s.cover_url || '',
+              play_url: rel && hostBase
+                ? hostBase + rel + sep + 'access_token=' + encodeURIComponent(cfg.token)
+                : '',
+            };
+          }) : null;
           return json(200, {
             query: q,
             enabled: process.env.FNMUSIC_MIOT_LIB_SEARCH !== '0',
@@ -47,6 +75,7 @@ export function createCompatHandler({ fn, music, cfg, log, storage }) {
               id: s.id, title: s.title, artist: s.artist,
               is_online: !!s.is_online, format: s.format, url: s.url,
             })),
+            ...(full ? { songs } : {}),
           });
         } catch (err) {
           return json(502, { error: String(err?.message || err) });

@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/songloft-org/plugin-toolchain/main/schemas/plugin.schema.json",
   "name": "Miot小爱音箱",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "description": "在飞牛音乐内嵌的小爱音箱控制页（薄壳插件）。真正的音箱控制由同机运行的 fnmusic-miot 原生应用提供。",
   "author": "le5inioo",
   "homepage": "https://github.com/le5inioo/fnmusic-miot",
@@ -14,8 +14,8 @@
   "permissions": [],
   "publicPaths": [],
   "updateUrl": "https://raw.githubusercontent.com/le5inioo/fnmusic-miot/main/plugin/plugin.json",
-  "download_url": "https://github.com/le5inioo/fnmusic-miot/releases/download/v2.1.1/fnmusic-miot.jsplugin.zip",
+  "download_url": "https://github.com/le5inioo/fnmusic-miot/releases/download/v2.2.0/fnmusic-miot.jsplugin.zip",
   "entryHash": "84a1d90bac9385d28e1099ba7183bb1c6509b1e2715594d571909647d5796dde",
-  "zipHash": "ae67737af000122cb1cfee89779cc85d3d49707f32510f0ad93de442909a5532",
+  "zipHash": "e15d1a5e0d121859dcd331571c29aa13c8e2a63bec6ace083c6ae5a93ffec135",
   "releaseSource": ""
 }
