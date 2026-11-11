@@ -26,6 +26,29 @@
   var THEME_KEY = 'fnmusic.miot.theme';
   var apiUrl = function (path) { return PREFIX + path; };
 
+  /* 歌单/歌曲列表 GET 瞬时失败静默重试一次：后端随安装或开机重启的窗口里，
+   * 到飞牛音乐网关的链路可能未就绪，「fetch failed」会原样透传成面板上的
+   * 「歌曲加载失败」。这里对幂等的列表请求兜底自愈，4xx 不重试。 */
+  (function () {
+    var orig = window.fetch;
+    if (typeof orig !== 'function') return;
+    var LIST_RE = /\/playlists(\?|#|$)|\/playlists\/[^/?#]+\/songs(\?|#|$)/;
+    window.fetch = function (input, init) {
+      var url = '';
+      if (typeof input === 'string') url = input;
+      else if (input && input.url) url = String(input.url);
+      var method = String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+      if (method !== 'GET' || !LIST_RE.test(url)) return orig.apply(this, arguments);
+      var send = function () { return orig.call(this, input, init); };
+      return send().then(function (res) {
+        if (res && (res.ok || res.status < 500)) return res;
+        return new Promise(function (r) { setTimeout(r, 800); }).then(send);
+      }, function () {
+        return new Promise(function (r) { setTimeout(r, 800); }).then(send);
+      });
+    };
+  })();
+
   /* 定制连接图标（160x160 透明 PNG，内嵌避免额外静态文件） */
   var CONN_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAYAAACLz2ctAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuNi1jMTM4IDc5LjE1OTgyNCwgMjAxNi8wOS8xNC0wMTowOTowMSAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENDIDIwMTcgKFdpbmRvd3MpIiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOkVFNTBBQjQyREQwMDExRjE5OEUxODczQUVEQkYxQ0JCIiB4bXBNTTpEb2N1bWVudElEPSJ4bXAuZGlkOkVFNTBBQjQzREQwMDExRjE5OEUxODczQUVEQkYxQ0JCIj4gPHhtcE1NOkRlcml2ZWRGcm9tIHN0UmVmOmluc3RhbmNlSUQ9InhtcC5paWQ6RUU1MEFCNDBERDAwMTFGMTk4RTE4NzNBRURCRjFDQkIiIHN0UmVmOmRvY3VtZW50SUQ9InhtcC5kaWQ6RUU1MEFCNDFERDAwMTFGMTk4RTE4NzNBRURCRjFDQkIiLz4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InIiPz5wJoLPAAAJMklEQVR42uyd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';
 
@@ -225,7 +248,7 @@
     '  .miot-page.miot-page-with-player::after { content:""; position:fixed;',
     '    left:0; right:0; bottom:0;',
     '    height:calc(20px + var(--sl-safe-bottom, 0px));',
-    '    background:var(--pt-bar-bg); z-index:79; pointer-events:none; }',
+    '    background:var(--pt-bar-bg); z-index:85; pointer-events:none; }',
     '  .fullscreen-controls-mobile .control-primary.sl-button {',
     '    width:60px !important; height:60px !important; min-height:60px !important; }',
     '  .fullscreen-controls-mobile .control-primary.sl-button .sl-icon {',

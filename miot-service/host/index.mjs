@@ -83,8 +83,11 @@ const cfg = {
   // FeiNiu Music gateway. fnOS 1.2.x exposes it on the *HTTP gateway port*
   // (6688 on this NAS, from /usr/trim/etc/network_gateway_setting.conf), not
   // on the old 5666 default. FNMUSIC_BASE_URL always wins when set.
+  // 默认走本机回环：访问自身 LAN IP 要绕经网络栈，网络未就绪时会
+  // Errno 101；老版本 .env 里遗留的 LAN IP 由 fnmusic client 启动时
+  // 探测回环可用后自动迁移（见 adapter/fnmusic.mjs normalizeBaseUrl）。
   fnBaseUrl: process.env.FNMUSIC_BASE_URL
-    || (nasIp ? `http://${nasIp}:${process.env.FNMUSIC_GATEWAY_PORT || '6688'}` : 'http://127.0.0.1:6688'),
+    || `http://127.0.0.1:${process.env.FNMUSIC_GATEWAY_PORT || '6688'}`,
   fnUsername: process.env.FNMUSIC_USERNAME || '',
   fnPassword: process.env.FNMUSIC_PASSWORD || '',
   // Read-only bind mount of trim.music/db (see docker-compose.yml). Used by
@@ -130,7 +133,9 @@ await ensureServerHost();
 async function resolveFnToken(force) {
   if (!fs.existsSync(cfg.tokenScript)) return null;
   const args = [cfg.tokenScript, '--db', cfg.musicDbPath,
-    '--base', cfg.fnBaseUrl, '--cache', cfg.tokenCache];
+    // 用 fn.baseUrl（client 可能在启动探测后迁移到回环）而不是静态配置，
+    // 保持 token 解析与 API 调用走同一条链路。
+    '--base', fn.baseUrl, '--cache', cfg.tokenCache];
   if (force) args.push('--force');
   try {
     const { stdout } = await execFileAsync('python3', args, {

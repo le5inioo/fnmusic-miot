@@ -126,7 +126,30 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
   let token = null;
   let useAuthx = true;
   let normalized = false;
+  let lastNormAttempt = 0;
   const deviceId = randomBytes(16).toString('hex');
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // 网络层瞬时失败（fetch failed / ECONNREFUSED / ENETUNREACH…）退避重试。
+  // 只覆盖「请求没发出去或没收到响应」的失败——HTTP 状态错误会正常返回
+  // Response 对象，不会进 catch。典型场景：miot 服务随安装/开机重启时，
+  // 飞牛音乐网关链路晚几百毫秒才就绪，首波请求会整体 fetch failed。
+  async function fetchRetry(run, { attempts = 3, baseDelayMs = 400 } = {}) {
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await run();
+      } catch (err) {
+        lastErr = err;
+        if (i < attempts - 1) {
+          log.warn?.(`[fnmusic] fetch retry ${i + 1}/${attempts - 1}: ${err.message}`);
+          await sleep(baseDelayMs * (i + 1));
+        }
+      }
+    }
+    throw lastErr;
+  }
 
   // 可选能力：fnmusic-ext 是否在位。结果带 60 秒 TTL，同一时刻只发一个探测，
   // 避免面板每次刷新 /playlists 都去碰一次系统 socket。
@@ -151,15 +174,39 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
 
   async function normalizeBaseUrl() {
     if (normalized) return;
-    normalized = true;
+    const now = Date.now();
+    if (now - lastNormAttempt < 15_000) return; // 失败后 15s 内不重复探测
+    lastNormAttempt = now;
+    // 老版本 .env 把 FNMUSIC_BASE_URL 写成 LAN IP（本机访问自己的网络
+    // 地址要绕经网络栈，网络未就绪时报 Errno 101）。回环地址永远先于
+    // 网络就绪，探测可用就自动迁移；不可用（网关只听 LAN）则保持原值。
     try {
-      const r = await nativeFetch(urlBase + API_BASE + '/initialization/state', { redirect: 'follow' });
+      const u = new URL(urlBase);
+      const host = u.hostname.toLowerCase();
+      const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+      if (!isLoopback && u.port) {
+        const loopback = `${u.protocol}//127.0.0.1:${u.port}`;
+        await fetchRetry(
+          () => nativeFetch(loopback + API_BASE + '/initialization/state', { redirect: 'follow' }),
+          { attempts: 2 },
+        );
+        log.info?.(`[fnmusic] prefer loopback ${urlBase} -> ${loopback}`);
+        urlBase = loopback;
+      }
+    } catch (err) {
+      log.warn?.(`[fnmusic] loopback probe failed, keep ${urlBase}: ${err.message}`);
+    }
+    try {
+      const r = await fetchRetry(
+        () => nativeFetch(urlBase + API_BASE + '/initialization/state', { redirect: 'follow' }),
+      );
       const final = new URL(r.url);
       const origin = final.origin;
       if (origin && origin !== urlBase) {
         log.warn?.(`[fnmusic] redirect ${urlBase} -> ${origin}`);
         urlBase = origin;
       }
+      normalized = true; // 探测成功才置位；失败保持 false，下次调用重试
     } catch (err) {
       log.warn?.(`[fnmusic] base url probe failed: ${err.message}`);
     }
@@ -167,7 +214,9 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
 
   async function login(force = false) {
     if (token && !force) return token;
+    await normalizeBaseUrl();
     if (tokenProvider) {
+      const before = urlBase;
       try {
         const supplied = await tokenProvider(force);
         if (supplied) {
@@ -177,15 +226,28 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
       } catch (err) {
         log.warn?.(`[fnmusic] token provider: ${err.message}`);
       }
+      // token 解析失败常见于网络未就绪；此时 normalizeBaseUrl 可能刚把
+      // 基址从 LAN IP 迁到回环，换链路再试一次。
+      await normalizeBaseUrl();
+      if (urlBase !== before) {
+        try {
+          const supplied = await tokenProvider(force);
+          if (supplied) {
+            token = supplied;
+            return token;
+          }
+        } catch (err) {
+          log.warn?.(`[fnmusic] token provider retry: ${err.message}`);
+        }
+      }
     }
-    await normalizeBaseUrl();
     const path = '/user/password-login';
     const body = JSON.stringify({ username, password: sha256Hex(password), deviceId });
     let lastError = '';
     for (const mode of [useAuthx, !useAuthx]) {
       const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
       if (mode) headers.authx = signAuthx('POST', path, null, Buffer.from(body));
-      const r = await nativeFetch(urlBase + API_BASE + path, { method: 'POST', headers, body, redirect: 'manual' });
+      const r = await fetchRetry(() => nativeFetch(urlBase + API_BASE + path, { method: 'POST', headers, body, redirect: 'manual' }), { attempts: 2 });
       let payload;
       try { payload = await r.json(); } catch { lastError = `HTTP ${r.status}`; continue; }
       if (payload?.code === 0) {
@@ -212,9 +274,9 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
     const body = jsonBody == null ? '' : JSON.stringify(jsonBody);
     const headers = apiHeaders(method, path, query, Buffer.from(body));
     if (jsonBody != null) headers['Content-Type'] = 'application/json';
-    const r = await nativeFetch(urlBase + API_BASE + path + encodeQuery(query), {
+    const r = await fetchRetry(() => nativeFetch(urlBase + API_BASE + path + encodeQuery(query), {
       method, headers, body: body || undefined, redirect: 'manual',
-    });
+    }));
     if ((r.status === 401 || r.status === 403) && !retried) {
       await login(true);
       return apiCall(method, path, query, jsonBody, true);
@@ -257,7 +319,10 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
       ...(rangeHeader ? { Range: rangeHeader } : {}),
     };
     for (let hop = 0; hop <= 5; hop++) {
-      const r = await nativeFetch(current, { method: 'GET', headers, redirect: 'manual' });
+      const r = await fetchRetry(
+        () => nativeFetch(current, { method: 'GET', headers, redirect: 'manual' }),
+        { attempts: 2 },
+      );
       if (r.status >= 300 && r.status < 400) {
         const loc = r.headers.get('location');
         if (!loc) throw new FnMusicError('302 without Location');
@@ -280,6 +345,9 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
     }
     throw new FnMusicError('too many redirects');
   }
+
+  // 启动即做一次基址探测/回环迁移，不等首次登录失败才触发。
+  void normalizeBaseUrl().catch(() => { /* 已在内部记日志 */ });
 
   return {
     get baseUrl() { return urlBase; },

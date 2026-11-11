@@ -278,7 +278,10 @@ fnmusic_miot_env_setup() {
     if [ -n "${ip}" ]; then
         _miot_env_add FNMUSIC_NAS_IP "${ip}"
         _miot_env_add FNMUSIC_GATEWAY_PORT "${port}"
-        _miot_env_add FNMUSIC_BASE_URL "http://${ip}:${port}"
+        # 后端访问飞牛音乐网关走本机回环：不走网络栈，避开「服务已启动、
+        # 网络未就绪」时访问自身 LAN IP 报 Errno 101 的启动竞态。
+        _miot_env_add FNMUSIC_BASE_URL "http://127.0.0.1:${port}"
+        # MIOT_SERVER_HOST 是音箱回访面板用的地址，必须保持可路由的 LAN IP。
         _miot_env_add MIOT_SERVER_HOST "http://${ip}:8775"
     fi
 
