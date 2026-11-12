@@ -3,8 +3,8 @@
 //
 // 替代容器版里的 supervisord + entrypoint.sh：拉起两个子进程并守护，
 // 子进程意外退出则退避重启；收到 SIGTERM 时按顺序优雅关闭。
-//   · miot      —— 控制层（miot-service/host/index.mjs，监听 8775）
-//   · console   —— 控制台网关（nodeconsole/server.mjs，监听 8776 + 桌面 socket）
+//   · miot      —— 控制层（miot-service/host/index.mjs，监听 MIOT_PORT）
+//   · console   —— 控制台网关（nodeconsole/server.mjs，监听 FNMUSIC_MIOT_CONSOLE_PORT + 桌面 socket）
 //
 // 日志：子进程输出加名前缀转 stdout（由 systemd/journald 收集），同时追加到
 // <repo>/miot-data/logs/<name>.log（单文件超过 5 MB 轮转一份 .1）。
@@ -44,16 +44,17 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 // 原生部署下的默认值。.env 里的显式配置优先（loadEnvFile 不会覆盖已有环境变量，
 // 但 .env 会写进 process.env，故这里只在「仍为空」时兜底）。
 const APPDIR = path.dirname(ROOT);
+// 安装脚本会把四个端口键一并对齐；这里再兜一层：只改了 MIOT_PORT 时，
+// 发布端口与网关反代端口自动跟随，避免控制层与控制台对不上。
+const controlPort = process.env.MIOT_PORT || '8775';
 const defaults = {
   MIOT_HOST: '0.0.0.0',
-  MIOT_PORT: '8775',
-  MIOT_PUBLIC_PORT: '8775',
-  MIOT_DATA_DIR: DATA_DIR,
-  MIOT_ENV_FILE: ENV_FILE,
-  MIOT_REQUIRE_AUTH: 'true',
+  MIOT_PORT: controlPort,
+  MIOT_PUBLIC_PORT: controlPort,
   MIOT_UPSTREAM_HOST: '127.0.0.1',
-  MIOT_UPSTREAM_PORT: '8775',
-  MIOT_TOKEN_FILE: path.join(DATA_DIR, 'token'),
+  MIOT_UPSTREAM_PORT: controlPort,
+  FNMUSIC_MIOT_CONSOLE_PORT: '8776',
+  MIOT_DATA_DIR: DATA_DIR,
   FNMUSIC_MIOT_SOCKET: path.join(APPDIR, 'fnmusic-miot.sock'),
   FNMUSIC_DB_PATH: '/usr/local/apps/@appdata/trim.music/db/music.db',
 };
@@ -71,12 +72,15 @@ function rotate(file) {
   } catch { /* 不存在或不可写，忽略 */ }
 }
 
-function makeLogger(name) {
+function makeLogger(name, onLine) {
   const file = path.join(LOG_DIR, `${name}.log`);
   return (chunk) => {
     const text = chunk.toString();
     for (const line of text.split(/\r?\n/)) {
-      if (line) console.log(`[${name}] ${line}`);
+      if (line) {
+        console.log(`[${name}] ${line}`);
+        if (onLine) onLine(line);
+      }
     }
     try {
       rotate(file);
@@ -95,7 +99,10 @@ let stopping = false;
 
 function start(prog) {
   if (stopping) return;
-  const out = makeLogger(prog.name);
+  let portConflict = false;
+  const out = makeLogger(prog.name, (line) => {
+    if (line.includes('EADDRINUSE')) portConflict = true;
+  });
   const child = spawn(process.execPath, [prog.entry], {
     cwd: ROOT,
     env: process.env,
@@ -114,8 +121,12 @@ function start(prog) {
     if (stopping) return;
     const lived = Date.now() - started;
     state.restarts = lived > 60000 ? 1 : state.restarts + 1;
-    const delay = Math.min(30000, 2000 * state.restarts);
-    console.log(`[runtime] ${prog.name} 退出 (code=${code} signal=${signal})，${delay}ms 后重启`);
+    const delay = portConflict ? 30000 : Math.min(30000, 2000 * state.restarts);
+    if (portConflict) {
+      console.log(`[runtime] ${prog.name} 端口被占用（EADDRINUSE）：请在 .env 中修改 MIOT_PORT / FNMUSIC_MIOT_CONSOLE_PORT 后重启；30 秒后重试`);
+    } else {
+      console.log(`[runtime] ${prog.name} 退出 (code=${code} signal=${signal})，${delay}ms 后重启`);
+    }
     setTimeout(() => start(prog), delay);
   });
 

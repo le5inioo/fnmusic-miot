@@ -37,10 +37,19 @@ fi
 
 if ! fnmusic_miot_wait_ready 30; then
     journalctl -u "${MIOT_UNIT_NAME}" -n 20 --no-pager >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
-    fnmusic_miot_fail_from_log "升级失败：控制层(8775)或控制台(8776)未在 30 秒内就绪"
+    echo "[fnmusic-miot] $(fnmusic_miot_ports_diagnosis)" >> "${FNMUSIC_MIOT_DURABLE_LOG}" 2>&1 || true
+    fnmusic_miot_fail_from_log "升级失败：控制层($(fnmusic_miot_control_port)) / 控制台($(fnmusic_miot_console_port)) 未在 30 秒内就绪；$(fnmusic_miot_ports_diagnosis)"
 fi
 
 echo "[fnmusic-miot] 升级完成 node=${NODE_BIN}" >> "${FNMUSIC_MIOT_LOG}"
+
+# 老版本升级引导：从「尚无端口设置入口」的版本升级时，写入待设置标记，
+# 让面板首次打开直接跳到「设置 → 服务端口」。MIOT_DATA_ROOT/VERSION 此时仍是旧版本。
+old_ver="$(cat "${MIOT_DATA_ROOT}/VERSION" 2>/dev/null | tr -d '[:space:]')"
+if fnmusic_miot_version_lt "${old_ver}" "${MIOT_PORT_GUIDE_SINCE}"; then
+    fnmusic_miot_write_port_guide_pending "upgrade" "${old_ver}"
+fi
+fnmusic_miot_record_version
 
 # 1.0.0 容器版的镜像已无用处（752 MB），服务起来后再回收，不影响升级结果。
 if command -v docker >/dev/null 2>&1; then

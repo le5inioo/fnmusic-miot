@@ -175,7 +175,7 @@ export class DLNAReceiver {
   private async announce(nts: string): Promise<void> {
     const socket = this.socket;
     for (const type of this.advertisements()) {
-      await this.discovery.send(socket, `NOTIFY * HTTP/1.1\r\nHOST: ${SSDP_ADDR}\r\nNT: ${type}\r\nNTS: ${nts}\r\nUSN: ${this.usn(type)}\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: ${this.endpoint()}${this.root()}/device.xml\r\nSERVER: Songloft/1.0 UPnP/1.0 MIoT/1.0\r\n\r\n`, SSDP_ADDR);
+      await this.discovery.send(socket, `NOTIFY * HTTP/1.1\r\nHOST: ${SSDP_ADDR}\r\nNT: ${type}\r\nNTS: ${nts}\r\nUSN: ${this.usn(type)}\r\nCACHE-CONTROL: max-age=1800\r\nLOCATION: ${this.endpoint()}${this.root()}/device.xml\r\nSERVER: Miot/1.0 UPnP/1.0 MIoT/1.0\r\n\r\n`, SSDP_ADDR);
     }
   }
   private scheduleAnnouncement(): void {
@@ -209,7 +209,7 @@ export class DLNAReceiver {
       void (async () => {
         for (const type of types) {
           if (generation !== this.generation) return;
-          await this.discovery.send(socket, `HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nEXT:\r\nLOCATION: ${this.endpoint()}${this.root()}/device.xml\r\nSERVER: Songloft/1.0 UPnP/1.0 MIoT/1.0\r\nST: ${type}\r\nUSN: ${this.usn(type)}\r\n\r\n`, event.remoteAddr);
+          await this.discovery.send(socket, `HTTP/1.1 200 OK\r\nCACHE-CONTROL: max-age=1800\r\nEXT:\r\nLOCATION: ${this.endpoint()}${this.root()}/device.xml\r\nSERVER: Miot/1.0 UPnP/1.0 MIoT/1.0\r\nST: ${type}\r\nUSN: ${this.usn(type)}\r\n\r\n`, event.remoteAddr);
         }
       })().catch(e => songloft.log.warn('[DLNA] Discovery response failed: ' + String(e)));
     }, Math.floor(Math.random() * Math.min(+headers.mx, 5) * 1000));

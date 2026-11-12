@@ -376,7 +376,7 @@ onUnmounted(() => {
     <div v-if="noServerHint" class="status-panel">
       <div class="inline-fields">
         <SlIcon name="info" :size="18" />
-        <span>{{ state.config.server_host_status === 'loopback' ? '服务器地址是本地回环地址，音箱无法访问。请在设置中改为局域网地址。' : '请先在设置中配置音箱可访问的 Songloft 服务器地址。' }}</span>
+        <span>{{ state.config.server_host_status === 'loopback' ? '服务器地址是本地回环地址，音箱无法访问。请在设置中改为局域网地址。' : '请先在设置中配置音箱可访问的 Miot 服务器地址。' }}</span>
         <SlButton variant="text" label="去设置" @click="navigation.settingsCategory = 'device'; openPage('settings')" />
       </div>
     </div>

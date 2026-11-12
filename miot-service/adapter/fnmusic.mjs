@@ -121,7 +121,12 @@ class FnMusicError extends Error {
 // account is OAuth-created, /user/password-login is unusable (code 120001);
 // the host supplies a live `music-token` session read from music.db instead.
 // Password login below remains as a fallback for accounts that do have one.
-export function createFnMusicClient({ baseUrl, username, password, tokenProvider = null, log = console }) {
+export function createFnMusicClient({
+  baseUrl, username, password, tokenProvider = null, log = console,
+  // 宿主注入的通用网关发现：仅当现有基址探测失败时调用，能通的用户零开销。
+  // 见 host/gateway.mjs（不依赖任何端口白名单，适用于任意自定义网关端口）。
+  discoverGateway = null, onGatewayResolved = null,
+}) {
   let urlBase = String(baseUrl || 'http://127.0.0.1:5666').replace(/\/$/, '');
   let token = null;
   let useAuthx = true;
@@ -209,6 +214,23 @@ export function createFnMusicClient({ baseUrl, username, password, tokenProvider
       normalized = true; // 探测成功才置位；失败保持 false，下次调用重试
     } catch (err) {
       log.warn?.(`[fnmusic] base url probe failed: ${err.message}`);
+      // 基址连不上（自定义网关端口、只绑 LAN 地址、或 .env 里遗留的错误值）
+      // 时交给宿主做通用发现：配置端口 / 本机 LISTEN 端口 × 回环与所有 LAN IP
+      // 逐个用飞牛特征端点验证，任意端口都能命中，不写死 6688/5666/51666。
+      if (discoverGateway) {
+        try {
+          const found = await discoverGateway({ current: urlBase, reason: err.message });
+          if (found?.ok && found.baseUrl) {
+            const previous = urlBase;
+            urlBase = found.baseUrl;
+            normalized = true;
+            log.info?.(`[fnmusic] gateway switched ${previous} -> ${urlBase} (${found.source})`);
+            await onGatewayResolved?.(found);
+          }
+        } catch (discoverErr) {
+          log.warn?.(`[fnmusic] gateway discovery error: ${discoverErr.message}`);
+        }
+      }
     }
   }
 

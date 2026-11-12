@@ -52,28 +52,56 @@ npm run build:panel         # frontend npm install + vite build → static/
 
 构建完把 `node_modules/` 删掉再打 fpk；`packaging/fpk/build.sh` 也会自动排除它。
 
-## 运行（容器内）
+## 运行与端口
 
-```bash
-MIOT_ENV_FILE=/repo/.env MIOT_DATA_DIR=/data/miot node host/index.mjs
-```
-
-配置键（写在 `/repo/.env`，或直接用环境变量）：
+原生部署由 `runtime/start.mjs` 拉起控制层（`host/index.mjs`）与控制台网关
+（`nodeconsole/server.mjs`）。端口写在已安装目录的 `.env`（安装脚本生成，
+升级时保留用户自定义值），**8775 / 8776 只是默认值**：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `MIOT_PORT` | `8006` | 容器内监听端口 |
-| `MIOT_TOKEN` | 生成并持久化到 `/data/miot/token` | 面板/播放 URL 鉴权；WebUI 反代读同一文件 |
-| `MIOT_REQUIRE_AUTH` | `true` | 8775 对局域网开放，不要关 |
-| `MIOT_SERVER_HOST` | `http://$FNMUSIC_NAS_IP:8775` | 音箱拉流基址，写进 miot 的 `config.server_host` |
+| `MIOT_PORT` | `8775` | 控制层监听端口（0.0.0.0，音箱回访拉播放地址） |
+| `MIOT_PUBLIC_PORT` | 同 `MIOT_PORT` | 音箱回访地址端口；写入 `server_host`，并经 `/config` 的 `control_port` 下发给面板 |
+| `MIOT_UPSTREAM_PORT` | 同 `MIOT_PORT` | 控制台网关反代到控制层的目标端口 |
+| `FNMUSIC_MIOT_CONSOLE_PORT` | `8776` | 控制台 TCP 网关（局域网浏览器直连）；桌面入口走 unix socket，与此端口无关 |
+| `MIOT_SERVER_HOST` | `http://$FNMUSIC_NAS_IP:$MIOT_PORT` | 音箱拉流基址，写进 miot 的 `config.server_host`；手填的域名/反向代理地址不会被覆盖 |
+
+自定义端口：**从 2.3.4 起可在「设置 → 设备 → 服务端口」（设备页顶部的「服务端口」区块，替代原「服务器配置」卡片）内可视化操作**（手动填 / 「自动填充」随机选端口 / 应用并自动重启），
+无需 SSH 改 `.env`；直接改 `.env` 后重启同样有效。修改 `MIOT_PORT` 与
+`FNMUSIC_MIOT_CONSOLE_PORT`（1024~65535、互不相同）后重启服务即可；安装脚本会自动对齐其余三个端口键与
+`MIOT_SERVER_HOST`。端口被占用时安装预检会给出占用进程，启动日志也会明确提示而不是无限重启；若默认端口
+恰好被占，全新安装时会自动避开并挑选空闲端口，仍会在首次引导（见下）里让用户确认。
+
+> **首次安装 / 老版本升级引导**：`port_setup_state.json`（`pending` / `reason` / `from_version`）位于
+> `<数据目录>/`（即 `FNMUSIC_MIOT_DATA_ROOT`，默认 `/vol1/@appdata/fnmusic-miot/var`）。`pending=true`
+> 时面板 `initialize()` 读取 `GET /ports/config` 后会直接跳到「设置 → 设备」（顶部「服务端口」区块）。清除方式：引导页点
+> 「保持默认并跳过」（`POST /ports/setup-done`），或在设置页成功应用端口（`POST /ports/apply`）。
+
+其余配置键：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `MIOT_TOKEN` | 生成并持久化到 `<数据目录>/miot/token` | 面板/播放 URL 鉴权；WebUI 反代读同一文件 |
+| `MIOT_REQUIRE_AUTH` | `true` | 控制层对局域网开放，不要关 |
 | `MIOT_SERVER_HOST_FORCE` | `false` | 从 Songloft 迁移旧配置时置 true 覆盖陈旧地址 |
-| `FNMUSIC_NAS_IP` | — | NAS 局域网 IP（容器是 bridge 网络，自动探测不到） |
-| `FNMUSIC_BASE_URL` | `http://$FNMUSIC_NAS_IP:6688` | 飞牛音乐网关（端口取自 `network_gateway_setting.conf`） |
-| `FNMUSIC_GATEWAY_PORT` | `6688` | 未显式设 BASE_URL 时拼装用 |
+| `FNMUSIC_NAS_IP` | — | NAS 局域网 IP |
+| `FNMUSIC_BASE_URL` | `http://127.0.0.1:<网关端口>` | 飞牛音乐网关；端口由 conf 探测 + 运行时自动发现（见下），**不要写死 6688** |
+| `FNMUSIC_GATEWAY_PORT` | conf 解析值（失败时 `6688`） | 未显式设 BASE_URL 时拼装用 |
 | `FNMUSIC_MUSIC_DB_DIR` | `/usr/local/apps/@appdata/trim.music/db` | compose 只读挂载为 `/fnmusic-db` |
 | `FNMUSIC_USERNAME` / `FNMUSIC_PASSWORD` | 回落 `FNMUSIC_IMPORT_*` | 有本地密码的账号才用得上（OAuth 账号见下） |
 | `FFMPEG_BIN` | `/usr/bin/ffmpeg` | 转码 |
 | `MIOT_MAX_TRANSCODES` | `2` | 并发转码上限 |
+
+**飞牛网关端口自动发现（2.3.4 起）**：各 NAS 的网关端口可能各不相同，代码里不带任何端口白名单。
+`host/gateway.mjs` 只在 `adapter/fnmusic.mjs` 的 `normalizeBaseUrl()` 探测失败时触发，按
+「conf 端口 → 环境变量端口 → `/proc/net/tcp{,6}` 全部 LISTEN 端口 × 回环/所有本机 IPv4」
+生成候选，用 `GET /music/api/v1/initialization/state` 的 `200 + application/json + code`
+特征精确识别；命中后切换运行时基址，并且只在 `.env` 里的值是自动生成的回环/本机 IP 地址时
+写回（用户手填域名、反向代理、带路径地址不动）。conf 解析兼容 JSON / `key=value` / ini。
+安装脚本 `fnmusic_miot_env_setup` 同步做了 JSON-aware 解析与历史错误值纠正。
+`fnmusic_token.py --base` 由 `host/index.mjs` 显式传 `fn.baseUrl`，与 API 调用始终同一条链路。
+诊断导出（`GET /diagnostics/logs`）含「环境 / 网关发现」脱敏段，可直接看到配置值、
+conf 解析端口、LISTEN 端口数与最近一次自动发现结果；配置正确时应显示「未触发」，表示零扫描。
 
 **飞牛音乐鉴权（3.8.1 实测修正）**：fnOS 账号若由 NAS OAuth 创建（`music.db` 里
 `user.created_by='oauth'`），`/user/password-login` 恒返回 `code=120001`，账密这条路不可用。
@@ -89,6 +117,11 @@ MIOT_ENV_FILE=/repo/.env MIOT_DATA_DIR=/data/miot node host/index.mjs
 | `/health` `/healthz` `/sync` `/play?guid=` | fnmusic-ext WebUI 兼容面 |
 | `/api/v1/songs/:id/play` | 音箱拉流（Range / format=mp3 / seek / speed / normalize） |
 | `/api/v1/songs/:id/cover` `/lyric` | 封面与歌词代理 |
+| `/ports/config` | 宿主级（不经插件 QuickJS）：返回当前控制层/控制台端口、`gateway_port`、`pending` 引导标记与 `reason`/`from_version` |
+| `/ports/suggest` | 探测两个可用随机空闲端口（读 `/proc/net/tcp*`、`net.createServer` 兜底盲选 10000~31000） |
+| `/ports/apply` | 校验并写入 `.env`（备份 `.env.before-port-apply`），按需 `systemd-run` 延迟重启服务 |
+| `/ports/setup-done` | 仅清除 `pending` 引导标记（「保持默认并跳过」） |
+| `/diagnostics/logs?lines=N` | 诊断日志导出（text/plain）；头部含「环境 / 网关发现」脱敏段 |
 | `/index.html` `/static/*` `/assets/*` | Vue 面板 |
 | 其余 | 交给 `onHTTPRequest`（SDK createRouter，95 条 REST） |
 | `/status/ws` `/conversation/ws` `/chat/ws` | 交给 `onWebSocket` |

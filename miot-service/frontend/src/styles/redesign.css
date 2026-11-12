@@ -146,6 +146,7 @@ body { text-rendering: optimizeLegibility; }
   color: var(--md-on-secondary-container);
 }
 .section-heading-copy { min-width: 0; flex: 1; display: block; }
+.section-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .miot-section .section-title {
   margin: 0;
   padding: 0;
@@ -169,6 +170,14 @@ body { text-rendering: optimizeLegibility; }
   border-radius: 20px;
   background: var(--md-surface-container-low);
   box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+}
+/* 内容只有一个操作（如「保持默认并跳过引导」）的 section：不画 surface。
+   否则 padding:0 的卡片边框会紧贴按钮，看起来像按钮外面多了一圈灰框。 */
+.card.miot-card.miot-card-flat {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .miot-section-warning .section-heading-icon,
 .miot-section-danger .section-heading-icon { background: var(--md-error-container); color: var(--md-on-error-container); }

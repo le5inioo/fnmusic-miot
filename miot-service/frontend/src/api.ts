@@ -145,3 +145,41 @@ export function pluginWebSocketUrl(path: string): string {
 export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error || '未知错误');
 }
+
+/**
+ * 宿主级（Node / 控制层）原始接口调用助手，用于不经过插件 QuickJS、由宿主
+ * `server.mjs` 直接处理的路由（如 /diagnostics/*、/ports/*）。
+ * 与插件 REST 不同，这些接口直接返回 `{ success, ... }`（数据内联而非包在
+ * `.data`），因此不走 `decodePayload` 的 `.data` 解包，原样返回 JSON 体。
+ * 鉴权方式与主路由一致：注入 fnOS 网关 token。
+ */
+export async function hostRequest<T = unknown>(
+  method: 'GET' | 'POST',
+  path: string,
+  body?: unknown,
+): Promise<T> {
+  const token = window.SongloftPlugin?.getAuthToken?.() || '';
+  const response = await fetch(`${hostPathPrefix()}${path}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = null;
+  }
+  if (!response.ok) {
+    const detail =
+      (payload as { error?: string; message?: string } | null)?.error
+      || (payload as { error?: string; message?: string } | null)?.message
+      || `请求失败 (${response.status})`;
+    throw new ApiError(detail, response.status);
+  }
+  return payload as T;
+}

@@ -52,6 +52,7 @@ function categoryStatus(category: (typeof categories)[number]): { label: string;
   }
   if (category.id === 'voice') return { label: state.config.conversation_monitor_enabled ? '运行中' : '未启用', tone: state.config.conversation_monitor_enabled ? 'success' : 'neutral' };
   if (category.id === 'schedule') return { label: state.config.scheduled_tasks_enabled ? '已启用' : '已暂停', tone: state.config.scheduled_tasks_enabled ? 'success' : 'neutral' };
+  if (category.id === 'device' && state.portSetupPending) return { label: '待设置', tone: 'warning' };
   return null;
 }
 const showMobileMenu = computed(() => isNarrow.value && !navigation.settingsCategory);

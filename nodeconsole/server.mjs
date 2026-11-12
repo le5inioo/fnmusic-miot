@@ -3,9 +3,9 @@
 //
 // 职责与容器版完全一致：
 //   1. 监听 fnOS 桌面网关 socket（<应用目录>/fnmusic-miot.sock，mode 0666）与
-//      TCP 8776（局域网直连），两者共用同一套路由；
+//      TCP 控制台端口（默认 8776，局域网直连），两者共用同一套路由；
 //   2. 网关转发进来的路径带 /app/fnmusic-miot 前缀，这里先剥掉；
-//   3. /health、/console 本地处理；其余全部反代给控制层（默认 127.0.0.1:8775）
+//   3. /health、/console 本地处理；其余全部反代给控制层（MIOT_UPSTREAM_PORT，默认 127.0.0.1:8775）
 //      并在服务端注入 Authorization，浏览器无需持有 token；
 //   4. WebSocket 握手用裸 socket 透传，token 同时放进 query 的 access_token；
 //   5. 面板 bundle 里写死的旧基路径 /app/fnmusic-ext/miot 改写成本应用前缀。
@@ -276,7 +276,11 @@ function attach(server, label) {
     if (socket.writable) socket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
   });
   server.on('error', (err) => {
-    log(`ERROR ${label}: ${err.code || err.message}`);
+    if (err.code === 'EADDRINUSE') {
+      log(`ERROR ${label} 端口已被其他应用占用：请在 .env 中修改 FNMUSIC_MIOT_CONSOLE_PORT（控制台 TCP）或 MIOT_PORT（控制层，需同步 MIOT_PUBLIC_PORT / MIOT_UPSTREAM_PORT / MIOT_SERVER_HOST）后重启`);
+    } else {
+      log(`ERROR ${label}: ${err.code || err.message}`);
+    }
     process.exit(1);
   });
   return server;

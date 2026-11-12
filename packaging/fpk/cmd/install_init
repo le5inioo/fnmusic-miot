@@ -32,4 +32,8 @@ else
     echo "[fnmusic-miot] 未检测到 fnmusic-ext：以纯本地曲库模式运行（不影响安装）" >> "${FNMUSIC_MIOT_LOG}" 2>&1
 fi
 
+# 端口占用预检：8775/8776 只是默认值，按 .env 里的实际端口检查；
+# 占用者是本应用旧实例（覆盖安装）时放行，其他应用占用时提前明确报错。
+fnmusic_miot_check_ports_preinstall
+
 exit 0

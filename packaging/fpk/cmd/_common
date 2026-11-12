@@ -184,6 +184,168 @@ fnmusic_miot_unit_active() {
     systemctl is-active --quiet "${MIOT_UNIT_NAME}" 2>/dev/null
 }
 
+# ------------------------------------------------------------------------------
+# 端口：8775 / 8776 只是首次安装的默认值，.env 才是唯一数据源。
+# 用户在 .env 里改 MIOT_PORT / FNMUSIC_MIOT_CONSOLE_PORT 后，安装、升级、
+# 探活与诊断都按实际值工作，不会被覆盖回默认值。
+# ------------------------------------------------------------------------------
+MIOT_DEFAULT_PORT="8775"
+MIOT_DEFAULT_CONSOLE_PORT="8776"
+
+# 服务端口引导功能自该版本起引入；从该版本之前的版本升级时，安装/升级脚本会写入
+# 「待设置」标记，让面板首次打开直接跳到「设置 → 服务端口」。空旧版本按「老版本」处理。
+MIOT_PORT_GUIDE_SINCE="2.3.4"
+
+# 语义化版本比较：传入「旧版本」与「起始版本」，旧 < 起始 时返回 0（真）。
+# 空旧版本视为「尚无此功能」，当作旧版处理。
+fnmusic_miot_version_lt() {
+  [ -z "$1" ] && return 0
+  local a="$1" b="${2:-${MIOT_PORT_GUIDE_SINCE}}" IFS='.'
+  local a1 a2 a3 b1 b2 b3 rest
+  a1="${a%%.*}"; rest="${a#*.}"; a2="${rest%%.*}"; a3="${rest#*.}"
+  b1="${b%%.*}"; rest="${b#*.}"; b2="${rest%%.*}"; b3="${rest#*.}"
+  [ "${a1:-0}" -lt "${b1:-0}" ] && return 0
+  [ "${a1:-0}" -gt "${b1:-0}" ] && return 1
+  [ "${a2:-0}" -lt "${b2:-0}" ] && return 0
+  [ "${a2:-0}" -gt "${b2:-0}" ] && return 1
+  [ "${a3:-0}" -lt "${b3:-0}" ] && return 0
+  return 1
+}
+
+# 把当前版本号持久化到数据根，供下次升级判断「是否从老版本升级」。
+fnmusic_miot_record_version() {
+  local v=""
+  [ -n "${MIOT_REPO_DIR}" ] && v="$(cat "${MIOT_REPO_DIR}/VERSION" 2>/dev/null | tr -d '[:space:]')"
+  [ -n "${v}" ] || return 0
+  mkdir -p "${MIOT_DATA_ROOT}" 2>/dev/null || true
+  echo "${v}" > "${MIOT_DATA_ROOT}/VERSION" 2>/dev/null || true
+}
+
+# 写入首次安装 / 老版本升级的端口引导标记。前端启动后读到 pending 会直接跳到
+# 「设置 → 服务端口」。reason: fresh-install | upgrade；from_version 为旧版本号。
+fnmusic_miot_write_port_guide_pending() {
+  local reason="${1:-fresh-install}" from="${2:-}"
+  mkdir -p "${MIOT_DATA_ROOT}" 2>/dev/null || true
+  cat > "${MIOT_DATA_ROOT}/port_setup_state.json" <<EOF
+{
+  "pending": true,
+  "reason": "${reason}",
+  "from_version": "${from}",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo unknown)"
+}
+EOF
+}
+
+# 仅在「即将使用默认端口且默认端口被其他程序占用」时，调用 runtime/pick_ports.mjs
+# 自动挑选两个空闲端口；返回 "控制层 控制台"（空格分隔），无占用返回空串。
+# 升级场景（.env 已带自定义端口）不会走到这里，因为那时不会选中默认端口。
+fnmusic_miot_pick_if_occupied() {
+  local node_bin="${1:-$(fnmusic_miot_find_node)}"
+  local owner1 owner2 picked
+  owner1="$(fnmusic_miot_port_owner "${MIOT_DEFAULT_PORT}")"
+  owner2="$(fnmusic_miot_port_owner "${MIOT_DEFAULT_CONSOLE_PORT}")"
+  if [ -z "${owner1}" ] && [ -z "${owner2}" ]; then
+    return 0
+  fi
+  echo "[fnmusic-miot] 默认端口被占用（控制层: ${owner1:-无}, 控制台: ${owner2:-无}），尝试自动挑选可用端口" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+  if [ -z "${node_bin}" ] || [ ! -x "${node_bin}" ]; then
+    echo "[fnmusic-miot] 未找到可用的 node，无法自动选端口，仍用默认值" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+    return 0
+  fi
+  picked="$(cd "${MIOT_REPO_DIR}" && "${node_bin}" runtime/pick_ports.mjs 2>>"${FNMUSIC_MIOT_LOG}")"
+  if [ -n "${picked}" ]; then
+    echo "${picked}"
+  fi
+}
+
+fnmusic_miot_valid_port() {
+    case "${1:-}" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "${1}" -ge 1024 ] && [ "${1}" -le 65535 ]
+}
+
+fnmusic_miot_control_port() {
+    local p; p="$(fnmusic_miot_env_get MIOT_PORT)"
+    if fnmusic_miot_valid_port "${p}"; then echo "${p}"; else echo "${MIOT_DEFAULT_PORT}"; fi
+}
+
+fnmusic_miot_console_port() {
+    local p; p="$(fnmusic_miot_env_get FNMUSIC_MIOT_CONSOLE_PORT)"
+    if fnmusic_miot_valid_port "${p}"; then echo "${p}"; else echo "${MIOT_DEFAULT_CONSOLE_PORT}"; fi
+}
+
+# 列出监听该端口的进程 pid（可能多个）。
+fnmusic_miot_port_pids() {
+    local port="$1"
+    if command -v ss >/dev/null 2>&1; then
+        ss -ltnp 2>/dev/null | grep -E "[:.]${port}[[:space:]]" \
+            | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser -n tcp "${port}" 2>/dev/null | tr -s ' ' '\n' \
+            | grep -E '^[0-9]+$' | sort -u
+    fi
+}
+
+# 端口被谁占着：返回 "进程名 (pid N)"，未被占用返回空串。
+fnmusic_miot_port_owner() {
+    local pid comm out="" p
+    for pid in $(fnmusic_miot_port_pids "$1"); do
+        comm="$(cat "/proc/${pid}/comm" 2>/dev/null || echo unknown)"
+        p="${comm} (pid ${pid})"
+        out="${out:+${out}, }${p}"
+    done
+    echo "${out}"
+}
+
+# 安装前端口预检：只有能明确判定「占用者不是本应用」时才阻断，
+# 避免在覆盖安装 / 升级（旧实例仍在监听）时误伤。判断不了就只记日志放行。
+# 首次安装（.env 尚无端口配置）且被占用的是默认端口时，只告警放行，
+# 让 env_setup 自动挑选空闲端口，避免安装直接失败。
+fnmusic_miot_check_ports_preinstall() {
+    local cp cport pid comm cgroup known=1 fresh=0
+    if [ ! -f "${MIOT_REPO_DIR}/.env" ] || ! grep -qE '^[[:space:]]*(export[[:space:]]+)?MIOT_PORT=' "${MIOT_REPO_DIR}/.env"; then
+        fresh=1
+    fi
+    cp="$(fnmusic_miot_control_port)"
+    cport="$(fnmusic_miot_console_port)"
+    for port in "${cp}" "${cport}"; do
+        for pid in $(fnmusic_miot_port_pids "${port}"); do
+            cgroup="/proc/${pid}/cgroup"
+            if [ ! -r "${cgroup}" ]; then
+                known=0
+                continue
+            fi
+            grep -q "${MIOT_UNIT_NAME}" "${cgroup}" 2>/dev/null && continue
+            comm="$(cat "/proc/${pid}/comm" 2>/dev/null || echo unknown)"
+            if [ "${fresh}" -eq 1 ] && { [ "${port}" = "${MIOT_DEFAULT_PORT}" ] || [ "${port}" = "${MIOT_DEFAULT_CONSOLE_PORT}" ]; }; then
+                echo "[fnmusic-miot] 默认端口 ${port} 已被 ${comm} (pid ${pid}) 占用：安装时自动避开" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+                continue
+            fi
+            echo "[fnmusic-miot] 端口 ${port} 已被 ${comm} (pid ${pid}) 占用" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+            fnmusic_miot_fail "端口 ${port} 已被 ${comm} (pid ${pid}) 占用：请停用该应用，或在 ${MIOT_REPO_DIR}/.env 中修改 MIOT_PORT / FNMUSIC_MIOT_CONSOLE_PORT 后重新安装。日志：${FNMUSIC_MIOT_DURABLE_LOG}"
+        done
+    done
+    [ "${known}" -eq 1 ] || echo "[fnmusic-miot] 端口占用者 cgroup 不可读，跳过预检（启动失败时仍会给出诊断）" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+    echo "[fnmusic-miot] 端口预检通过 (control=${cp}, console=${cport})" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+}
+
+# 启动/安装失败时给出可执行的诊断，而不是笼统的「启动超时」。
+fnmusic_miot_ports_diagnosis() {
+    local cp cport out="" owner
+    cp="$(fnmusic_miot_control_port)"
+    cport="$(fnmusic_miot_console_port)"
+    owner="$(fnmusic_miot_port_owner "${cp}")"
+    [ -n "${owner}" ] && out="控制层端口 ${cp} 被 ${owner} 占用；"
+    owner="$(fnmusic_miot_port_owner "${cport}")"
+    [ -n "${owner}" ] && out="${out}控制台端口 ${cport} 被 ${owner} 占用；"
+    if [ -n "${out}" ]; then
+        echo "${out}请停用占用方，或修改 ${MIOT_REPO_DIR}/.env 中的 MIOT_PORT / FNMUSIC_MIOT_CONSOLE_PORT 后重试。"
+    else
+        echo "控制层 ${cp} / 控制台 ${cport} 未就绪且未发现端口占用，请查看日志：${FNMUSIC_MIOT_DURABLE_LOG}"
+    fi
+}
+
 # 探测单个端口是否已接受连接。有 curl 就做 HTTP 探活，没有就退回裸 TCP 探测。
 _miot_port_ready() {
     local port="$1"
@@ -194,11 +356,13 @@ _miot_port_ready() {
     (exec 3<>"/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1
 }
 
-# 等控制层 8775 与控制台 8776 都可用；最多 ${1:-20} 秒。
+# 等控制层与控制台都可用；端口按 .env 实际配置，最多 ${1:-20} 秒。
 fnmusic_miot_wait_ready() {
-    local seconds="${1:-20}" i=0
+    local seconds="${1:-20}" i=0 cp cport
+    cp="$(fnmusic_miot_control_port)"
+    cport="$(fnmusic_miot_console_port)"
     while [ "${i}" -lt $((seconds * 2)) ]; do
-        if _miot_port_ready 8776 && _miot_port_ready 8775; then
+        if _miot_port_ready "${cport}" && _miot_port_ready "${cp}"; then
             return 0
         fi
         i=$((i + 1))
@@ -236,8 +400,51 @@ _miot_env_del() {
     rm -f "${tmp}"
 }
 
+# 从 fnOS 网关配置里读 HTTP 网关端口。配置文件实际是 JSON
+# （{"schema":{"http":{"port":6688},"https":{"port":6689}},...}），老实现用
+# sed 找字面 `schema.http.port` 从未命中，端口永远回落 6688；而自定义端口
+# （5666 / 51666 / 任意值）的用户就会一直连到不存在的端口。这里同时兼容
+# JSON、key=value、ini 三种写法，不预设任何具体端口号。
+fnmusic_miot_gateway_port() {
+    local conf="${FNMUSIC_GATEWAY_CONF:-/usr/trim/etc/network_gateway_setting.conf}"
+    local text="" p=""
+    [ -r "${conf}" ] || return 1
+    text="$(cat "${conf}" 2>/dev/null)"
+    [ -n "${text}" ] || return 1
+    # 优先 JSON 里的 schema.http.port（http 段通常排在 https 前）。
+    p="$(printf '%s' "${text}" | sed -n 's/.*"http"[^0-9]*\([0-9]\{2,5\}\).*/\1/p' | head -n1)"
+    # 兜底：任意含 port 的键 / 文本，取其后第一个 2~5 位数字。
+    if [ -z "${p}" ]; then
+        p="$(printf '%s\n' "${text}" \
+            | grep -oiE '[A-Za-z0-9_.-]*port[A-Za-z0-9_.-]*[^0-9]{0,8}[0-9]{2,5}' \
+            | grep -oE '[0-9]{2,5}$' | head -n1)"
+    fi
+    [ -n "${p}" ] || return 1
+    printf '%s' "${p}"
+}
+
+# 判断 FNMUSIC_BASE_URL 是否为「安装脚本自动生成」的地址：
+# http(s)://<回环或本机 LAN IP>[:端口][/]，无路径 / 查询 / userinfo。
+# 用户手填的域名、反向代理、带路径的地址一律返回 false，绝不覆盖。
+fnmusic_miot_is_auto_base() {
+    local v="${1%/}" ip="$2" rest=""
+    [ -n "${v}" ] || return 0
+    case "${v}" in *\?*|*\#*|*@*) return 1 ;; esac
+    case "${v}" in http://*|https://*) ;; *) return 1 ;; esac
+    rest="${v#*://}"
+    case "${rest}" in */*) return 1 ;; esac
+    case "${rest}" in
+        127.0.0.1|127.0.0.1:*|localhost|localhost:*|'[::1]'|'[::1]':*) return 0 ;;
+    esac
+    if [ -n "${ip}" ]; then
+        case "${rest}" in "${ip}"|"${ip}":*) return 0 ;; esac
+    fi
+    return 1
+}
+
 fnmusic_miot_env_setup() {
-    local env_file="${MIOT_REPO_DIR}/.env" ip="" port="6688" gw_conf="" p="" node_bin=""
+    local env_file="${MIOT_REPO_DIR}/.env" ip="" port="6688" p="" node_bin=""
+    local gw_found=0 gw_conf="" ctrl_port console_port legacy=0 cur
     [ -f "${env_file}" ] || : > "${env_file}"
 
     ip="$(ip -4 -o addr show scope global 2>/dev/null \
@@ -245,27 +452,57 @@ fnmusic_miot_env_setup() {
     if [ -z "${ip}" ]; then
         ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
     fi
-    gw_conf="/usr/trim/etc/network_gateway_setting.conf"
-    if [ -r "${gw_conf}" ]; then
-        p="$(sed -n 's/.*schema\.http\.port[^0-9]*\([0-9]\{2,5\}\).*/\1/p' "${gw_conf}" | head -n1 || true)"
-        [ -n "${p}" ] && port="${p}"
+    if p="$(fnmusic_miot_gateway_port)" && [ -n "${p}" ]; then
+        port="${p}"
+        gw_found=1
+    fi
+
+    # 容器版（1.0.0）的 .env 里 MIOT_PORT=8006 是容器内监听端口，与原生版语义不同；
+    # 只有识别到这组遗留特征时才强制改端口，其余情况一律尊重用户自定义值。
+    if grep -qE '^[[:space:]]*(export[[:space:]]+)?MIOT_DATA_DIR=/data/miot' "${env_file}" 2>/dev/null \
+       || grep -qE '^[[:space:]]*(export[[:space:]]+)?FNMUSIC_DB_PATH=/fnmusic-db' "${env_file}" 2>/dev/null; then
+        legacy=1
+    fi
+    ctrl_port="${MIOT_DEFAULT_PORT}"
+    console_port="${MIOT_DEFAULT_CONSOLE_PORT}"
+    if [ "${legacy}" -eq 0 ]; then
+        cur="$(fnmusic_miot_env_get MIOT_PORT)"
+        [ -n "${cur}" ] && ctrl_port="${cur}"
+        cur="$(fnmusic_miot_env_get FNMUSIC_MIOT_CONSOLE_PORT)"
+        [ -n "${cur}" ] && console_port="${cur}"
+    fi
+    # 即将使用默认端口且被其他程序占用时，自动挑选两个空闲端口，
+    # 避免安装因端口冲突直接失败（用户仍会在引导页看到并确认这些端口）。
+    if [ "${ctrl_port}" = "${MIOT_DEFAULT_PORT}" ] && [ "${console_port}" = "${MIOT_DEFAULT_CONSOLE_PORT}" ]; then
+        local resolved
+        resolved="$(fnmusic_miot_pick_if_occupied)"
+        if [ -n "${resolved}" ]; then
+            ctrl_port="${resolved%% *}"
+            console_port="${resolved##* }"
+        fi
+    fi
+    if ! fnmusic_miot_valid_port "${ctrl_port}" || ! fnmusic_miot_valid_port "${console_port}" \
+       || [ "${ctrl_port}" = "${console_port}" ]; then
+        fnmusic_miot_fail "端口配置无效：MIOT_PORT=${ctrl_port}、FNMUSIC_MIOT_CONSOLE_PORT=${console_port}（须为 1024~65535 且互不相同），请修改 ${env_file}"
     fi
 
     node_bin="$(fnmusic_miot_find_node)"
     [ -n "${node_bin}" ] || node_bin="/usr/bin/node"
 
-    # 覆盖写：这些键在容器版里是另一套语义（8006 / /data/miot / /fnmusic-db）。
+    # 端口键仍用覆盖写，但值来自上面解析出的实际端口（含用户自定义），
+    # 保证 MIOT_PORT / MIOT_PUBLIC_PORT / MIOT_UPSTREAM_PORT 三者始终一致。
     _miot_env_set FNMUSIC_MIOT_APPDIR "${MIOT_APPDIR}"
     _miot_env_set FNMUSIC_MIOT_NODE_BIN "${node_bin}"
     _miot_env_set FNMUSIC_MIOT_DATA_ROOT "${MIOT_DATA_ROOT}"
     _miot_env_set MIOT_HOST "0.0.0.0"
-    _miot_env_set MIOT_PORT "8775"
-    _miot_env_set MIOT_PUBLIC_PORT "8775"
+    _miot_env_set MIOT_PORT "${ctrl_port}"
+    _miot_env_set MIOT_PUBLIC_PORT "${ctrl_port}"
     _miot_env_set MIOT_DATA_DIR "${MIOT_DATA_ROOT}/miot"
     _miot_env_set MIOT_ENV_FILE "${env_file}"
     _miot_env_set MIOT_TOKEN_FILE "${MIOT_DATA_ROOT}/miot/token"
     _miot_env_set MIOT_UPSTREAM_HOST "127.0.0.1"
-    _miot_env_set MIOT_UPSTREAM_PORT "8775"
+    _miot_env_set MIOT_UPSTREAM_PORT "${ctrl_port}"
+    _miot_env_set FNMUSIC_MIOT_CONSOLE_PORT "${console_port}"
     _miot_env_set FNMUSIC_MIOT_SOCKET "${MIOT_SOCKET}"
     _miot_env_set FNMUSIC_DB_PATH "/usr/local/apps/@appdata/trim.music/db/music.db"
     # 容器版把网关 token 写进了 .env；原生版的 token 只存在 MIOT_TOKEN_FILE 里。
@@ -275,18 +512,43 @@ fnmusic_miot_env_setup() {
     _miot_env_add MIOT_REQUIRE_AUTH true
     _miot_env_add MIOT_SERVER_HOST_FORCE false
     _miot_env_add FNMUSIC_MUSIC_DB_DIR "/usr/local/apps/@appdata/trim.music/db"
+
+    # 网关端口 / 基址不再依赖 LAN IP 是否探测成功（回环基址本来就不需要 IP），
+    # 也不再把 6688 当唯一答案：conf 解析成功时对齐端口，并纠正脚本自动生成
+    # 但已过时的旧基址（例如用户把网关从 6688 改成任意其他端口后升级）。
+    # 用户手填的域名 / 反向代理 / 带路径地址一律保留；即便这里判断不了，
+    # 运行时 host/gateway.mjs 也会在探测失败时自动发现正确端口。
+    local want_base="http://127.0.0.1:${port}" cur_base=""
+    cur_base="$(fnmusic_miot_env_get FNMUSIC_BASE_URL)"
+    if [ "${gw_found}" -eq 1 ]; then
+        _miot_env_set FNMUSIC_GATEWAY_PORT "${port}"
+    else
+        _miot_env_add FNMUSIC_GATEWAY_PORT "${port}"
+    fi
+    if [ -z "${cur_base}" ] || fnmusic_miot_is_auto_base "${cur_base}" "${ip}"; then
+        if [ -n "${cur_base}" ] && [ "${cur_base}" != "${want_base}" ]; then
+            echo "[fnmusic-miot] 网关基址已纠正: ${cur_base} -> ${want_base} (conf=${port})" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+        fi
+        _miot_env_set FNMUSIC_BASE_URL "${want_base}"
+    else
+        echo "[fnmusic-miot] 保留用户自定义网关基址: ${cur_base}" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+    fi
+
     if [ -n "${ip}" ]; then
         _miot_env_add FNMUSIC_NAS_IP "${ip}"
-        _miot_env_add FNMUSIC_GATEWAY_PORT "${port}"
-        # 后端访问飞牛音乐网关走本机回环：不走网络栈，避开「服务已启动、
-        # 网络未就绪」时访问自身 LAN IP 报 Errno 101 的启动竞态。
-        _miot_env_add FNMUSIC_BASE_URL "http://127.0.0.1:${port}"
-        # MIOT_SERVER_HOST 是音箱回访面板用的地址，必须保持可路由的 LAN IP。
-        _miot_env_add MIOT_SERVER_HOST "http://${ip}:8775"
+        # MIOT_SERVER_HOST 是音箱回访用的地址，必须保持可路由的 LAN IP。
+        # 自动生成形式 http://<LAN IP>:<端口> 在端口变更后自动跟随；
+        # 用户手填的域名 / 反向代理地址原样保留。
+        cur="$(fnmusic_miot_env_get MIOT_SERVER_HOST)"
+        if [ -z "${cur}" ] || [ "${legacy}" -eq 1 ]; then
+            _miot_env_set MIOT_SERVER_HOST "http://${ip}:${ctrl_port}"
+        elif printf '%s\n' "${cur}" | grep -qE "^https?://${ip//./\\.}:[0-9]+/?$"; then
+            _miot_env_set MIOT_SERVER_HOST "http://${ip}:${ctrl_port}"
+        fi
     fi
 
     mkdir -p "${MIOT_DATA_ROOT}/miot" "${MIOT_LOG_DIR}" 2>/dev/null || true
-    echo "[fnmusic-miot] 环境键已对齐 (ip=${ip:-未探测}, gateway=${port}, node=${node_bin})" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+    echo "[fnmusic-miot] 环境键已对齐 (ip=${ip:-未探测}, gateway=${port}/$( [ "${gw_found}" -eq 1 ] && echo conf || echo default ), control=${ctrl_port}, console=${console_port}, node=${node_bin})" >> "${FNMUSIC_MIOT_LOG}" 2>&1
 }
 
 # ------------------------------------------------------------------------------

@@ -18,6 +18,7 @@ export interface AIConfig {
 
 export interface MiotConfig {
   server_host: string;
+  control_port: number;
   server_host_status: 'empty' | 'loopback' | 'ok';
   suggested_addresses: string[];
   conversation_monitor_enabled: boolean;

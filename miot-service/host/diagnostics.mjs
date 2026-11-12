@@ -70,7 +70,16 @@ function readVersion(cfg) {
   return 'unknown';
 }
 
-export function createDiagnostics({ cfg, storage, log }) {
+// 诊断导出里允许出现的 .env 键（地址 / 端口类）。token、用户名、密码、
+// 数据库路径一律不导出；URL 里若带 userinfo 也会被打码。
+const DIAG_ENV_KEYS = new Set([
+  'FNMUSIC_BASE_URL', 'FNMUSIC_GATEWAY_PORT', 'FNMUSIC_NAS_IP',
+  'MIOT_PORT', 'MIOT_PUBLIC_PORT', 'MIOT_UPSTREAM_PORT',
+  'FNMUSIC_MIOT_CONSOLE_PORT', 'MIOT_SERVER_HOST', 'MIOT_SERVER_HOST_FORCE',
+  'MIOT_REQUIRE_AUTH',
+]);
+
+export function createDiagnostics({ cfg, storage, log, gateway = null }) {
   const envAccessLog = String(process.env.FNMUSIC_MIOT_ACCESS_LOG || '').trim().toLowerCase();
   const forced = envAccessLog === '0' ? false : (/^(1|true|yes|on)$/i.test(envAccessLog) ? true : null);
   const state = {
@@ -114,6 +123,21 @@ export function createDiagnostics({ cfg, storage, log }) {
     { name: 'console（控制台网关，当前）', file: 'console.log' },
   ];
 
+  /** 读取 .env 白名单键，供排查「网关端口不对 / 基址写错」类问题。 */
+  function envKeyLines() {
+    const file = process.env.MIOT_ENV_FILE || path.join(cfg.repoRoot || '', '.env');
+    let raw = '';
+    try { raw = fs.readFileSync(file, 'utf8'); } catch { return null; }
+    const out = [];
+    for (const line of raw.split(/\r?\n/)) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!m || !DIAG_ENV_KEYS.has(m[1])) continue;
+      const v = m[2].trim().replace(/^['"]|['"]$/g, '').replace(/\/\/[^/@]+@/, '//***@');
+      out.push(`${m[1]}=${v}`);
+    }
+    return out.length ? out : null;
+  }
+
   /** 拼装诊断日志文本。 */
   async function exportLogs({ lines } = {}) {
     const maxLines = clampLines(lines);
@@ -126,6 +150,20 @@ export function createDiagnostics({ cfg, storage, log }) {
     out.push(`数据目录: ${cfg.dataDir}`);
     out.push(`日志目录: ${logDir()}`);
     out.push(`调试日志开关: ${accessLogEnabled() ? '开' : '关'}${forced !== null ? '（由环境变量 FNMUSIC_MIOT_ACCESS_LOG 固定）' : ''}`);
+    out.push('');
+    out.push('==== 环境 / 网关发现（脱敏，不含任何凭据） ====');
+    const envLines = envKeyLines();
+    if (envLines) out.push(...envLines);
+    else out.push('(.env 不可读或没有可导出的地址/端口键)');
+    if (gateway) {
+      const s = gateway.snapshot();
+      out.push(`运行时网关基址: ${s.runtime}`);
+      out.push(`网关配置: ${s.confPath} 可读=${s.confReadable} 解析到端口=[${s.confPorts.join(', ') || '无'}]`);
+      out.push(`本机 LISTEN 端口数: ${s.listenPortCount}；本机 LAN IPv4: [${s.lanIps.join(', ') || '无'}]`);
+      out.push(`发现时排除的本应用端口: [${s.selfPorts.join(', ') || '无'}]`);
+      out.push(`网关结果写回 .env: ${JSON.stringify(s.persist)}`);
+      out.push(`最近一次自动发现: ${s.lastDiscover ? JSON.stringify(s.lastDiscover) : '未触发（当前基址可连通）'}`);
+    }
     out.push('');
     for (const src of LOG_SOURCES) {
       out.push(`==== ${src.name} (${src.file}, 最近 ${maxLines} 行) ====`);

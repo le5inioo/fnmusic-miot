@@ -142,7 +142,8 @@ export function installSongloft({ cfg, storage, music, log }) {
         // main.ts compares these strings against the full server_host URL when
         // warning about a stale address; include it too, otherwise every boot
         // logs a false "音箱将无法访问" warning on a bridge-network container.
-        const full = (process.env.MIOT_SERVER_HOST || (preferred ? `http://${preferred}:8775` : '')).trim();
+        const full = (process.env.MIOT_SERVER_HOST
+          || (preferred ? `http://${preferred}:${cfg.publicPort}` : '')).trim();
         if (full) out.push(full.replace(/\/$/, ''));
         for (const [name, list] of Object.entries(os.networkInterfaces())) {
           if (/^(docker|br-|veth|tun|tap|virbr|flannel|cni)/.test(name)) continue;

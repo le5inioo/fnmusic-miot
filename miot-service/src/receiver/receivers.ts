@@ -14,7 +14,7 @@ const IDENTITIES_KEY = 'dlna_receiver_devices';
 const keyOf = (account: string, device: string) => JSON.stringify([account, device]);
 
 export class DLNAReceivers {
-  private config: Settings = { enabled: false, name: 'Songloft 小爱音箱', base_url: '', enabled_ids: [] };
+  private config: Settings = { enabled: false, name: 'Miot 小爱音箱', base_url: '', enabled_ids: [] };
   private identities: Identity[] = [];
   private receivers = new Map<string, DLNAReceiver>();
   private discovery = new SSDPDiscovery();

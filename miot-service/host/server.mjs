@@ -128,7 +128,7 @@ function resolveStatic(staticDir, pathname) {
   // Vite emits <staticDir>/js/app.js and <staticDir>/css/style.css, but the
   // generated index.html references "static/js/app.js" (the Songloft host
   // mounted the panel under a /static/ URL prefix). Try both layouts so the
-  // same bundle works behind our /miot/* proxy and on a bare 8775 URL.
+  // same bundle works behind our /miot/* proxy and on a bare control-port URL.
   const root = path.resolve(staticDir);
   for (const q of [p.replace(/^\/static\//, '/'), p]) {
     const full = path.resolve(root, '.' + q);
@@ -192,7 +192,7 @@ function mergePlayParams(searchParams, opts) {
 // 推流访问日志（[ACCESS]）跟随全局调试开关（diagnostics 状态），不再固定开启；
 // 见 host/diagnostics.mjs 与工具箱「调试与诊断」。
 
-export async function startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log, diagnostics }) {
+export async function startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log, diagnostics, ports }) {
   const accessLogEnabled = () => (diagnostics ? diagnostics.accessLogEnabled() : true);
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
@@ -278,7 +278,7 @@ export async function startServer({ cfg, streamHandler, coverHandler, lyricHandl
       // 2d) 诊断端点（宿主级，Node 直接处理，不走插件 QuickJS）：
       //     GET  /diagnostics/logs     导出运行日志（text/plain 附件）
       //     POST /diagnostics/debug-mode  同步全局调试开关（门控 [ACCESS] 日志）
-      //     控制台 8776 网关会把 /app/fnmusic-miot/* 反代到这里并注入 token。
+      //     控制台网关会把 /app/fnmusic-miot/* 反代到这里并注入 token。
       if (pathname === '/diagnostics/debug-mode' && diagnostics) {
         if (!authorized(req, url, cfg)) { res.writeHead(401); res.end('unauthorized'); return; }
         if (req.method !== 'POST') { res.writeHead(405, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'method not allowed' })); return; }
@@ -304,6 +304,43 @@ export async function startServer({ cfg, streamHandler, coverHandler, lyricHandl
           'Cache-Control': 'no-store',
         });
         res.end(result.body);
+        return;
+      }
+
+      // 2e) 服务端口设置与首次安装/升级引导（宿主级，Node 直接处理）：
+      //     GET  /ports/config      当前端口与 pending 状态
+      //     GET  /ports/suggest     探测两个可用的随机端口
+      //     POST /ports/apply       写 .env + 延迟重启服务
+      //     POST /ports/setup-done  只清除引导标记
+      //     控制台网关会剥掉 /app/fnmusic-miot 前缀并注入 token。
+      if (ports && pathname.startsWith('/ports/')) {
+        if (!authorized(req, url, cfg)) { res.writeHead(401); res.end('unauthorized'); return; }
+        const sendJson = (code, payload) => {
+          res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(payload));
+        };
+        try {
+          if (pathname === '/ports/config' && req.method === 'GET') {
+            sendJson(200, ports.config());
+            return;
+          }
+          if (pathname === '/ports/suggest' && req.method === 'GET') {
+            sendJson(200, await ports.suggest());
+            return;
+          }
+          if (pathname === '/ports/apply' && req.method === 'POST') {
+            const raw = await collectBody(req);
+            sendJson(200, await ports.apply(raw ? JSON.parse(raw) : {}));
+            return;
+          }
+          if (pathname === '/ports/setup-done' && req.method === 'POST') {
+            sendJson(200, ports.setupDone());
+            return;
+          }
+          sendJson(405, { error: 'method not allowed' });
+        } catch (err) {
+          sendJson(400, { error: String(err?.message || err) });
+        }
         return;
       }
 

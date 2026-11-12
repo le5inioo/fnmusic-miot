@@ -16,6 +16,8 @@ import { createStorage } from './storage.mjs';
 import { installSongloft } from './songloft.mjs';
 import { startServer } from './server.mjs';
 import { createDiagnostics } from './diagnostics.mjs';
+import { createPorts } from './ports.mjs';
+import { createGatewayDiscovery } from './gateway.mjs';
 import { createFnMusicClient } from '../adapter/fnmusic.mjs';
 import { createMusicAdapter } from '../adapter/songs.mjs';
 import { createStreamHandler, createCoverHandler, createLyricHandler } from '../adapter/stream.mjs';
@@ -66,27 +68,30 @@ function loadOrCreateToken() {
 // Address the speaker must use to fetch /api/v1/songs/:id/play. 127.0.0.1
 // would make the speaker call itself, so derive from the NAS LAN IP.
 const nasIp = process.env.FNMUSIC_NAS_IP || '';
-const defaultServerHost = nasIp ? `http://${nasIp}:8775` : '';
+// 端口以 .env 为唯一数据源：MIOT_PORT 是监听端口，MIOT_PUBLIC_PORT 是音箱
+// 回访用的发布端口（自定义端口时由安装脚本一并对齐，不再有 8775 硬编码）。
+const listenPort = Number(process.env.MIOT_PORT || 8775);
+const publicPort = Number(process.env.MIOT_PUBLIC_PORT || listenPort);
+const defaultServerHost = nasIp ? `http://${nasIp}:${publicPort}` : '';
 
 const cfg = {
   host: process.env.MIOT_HOST || '0.0.0.0',
-  port: Number(process.env.MIOT_PORT || 8006),
-  // 宿主侧发布端口（docker-compose 的 "0.0.0.0:8775:8006"），管理台用它拼音箱地址。
-  publicPort: Number(process.env.MIOT_PUBLIC_PORT || 8775),
+  port: listenPort,
+  publicPort,
   dataDir,
   staticDir: path.resolve(process.env.MIOT_STATIC_DIR || path.join(ROOT, 'static')),
   distFile: path.resolve(process.env.MIOT_DIST || path.join(ROOT, 'bundle/main.js')),
   token: loadOrCreateToken(),
-  // 8775 is published on 0.0.0.0 for the speaker; auth must therefore be ON.
+  // The control port is published on 0.0.0.0 for the speaker; auth must be ON.
   requireAuth: !/^(0|false|no|off)$/i.test(process.env.MIOT_REQUIRE_AUTH || 'true'),
   serverHost: (process.env.MIOT_SERVER_HOST || defaultServerHost).replace(/\/$/, ''),
   forceServerHost: /^(1|true|yes|on)$/i.test(process.env.MIOT_SERVER_HOST_FORCE || ''),
-  // FeiNiu Music gateway. fnOS 1.2.x exposes it on the *HTTP gateway port*
-  // (6688 on this NAS, from /usr/trim/etc/network_gateway_setting.conf), not
-  // on the old 5666 default. FNMUSIC_BASE_URL always wins when set.
-  // 默认走本机回环：访问自身 LAN IP 要绕经网络栈，网络未就绪时会
-  // Errno 101；老版本 .env 里遗留的 LAN IP 由 fnmusic client 启动时
-  // 探测回环可用后自动迁移（见 adapter/fnmusic.mjs normalizeBaseUrl）。
+  // FeiNiu Music gateway. 端口因 NAS 而异（6688 / 5666 / 51666 / 任意自定义），
+  // 所以这里只是「首次启动的初始猜测」：FNMUSIC_BASE_URL > FNMUSIC_GATEWAY_PORT
+  // > 6688。真正兜底在 host/gateway.mjs —— 现有基址探测失败时会按配置 +
+  // 本机 LISTEN 端口 × 回环/所有 LAN IP 自动发现并写回 .env。
+  // 默认走回环可避开「服务已起、网络未就绪」时访问自身 LAN IP 的 Errno 101；
+  // 网关只绑 LAN 地址时由发现逻辑换成 LAN IP。
   fnBaseUrl: process.env.FNMUSIC_BASE_URL
     || `http://127.0.0.1:${process.env.FNMUSIC_GATEWAY_PORT || '6688'}`,
   fnUsername: process.env.FNMUSIC_USERNAME || '',
@@ -115,6 +120,8 @@ const storage = createStorage(path.join(cfg.dataDir, 'storage.json'), log);
 // ConfigManager merges defaults, so writing just server_host is enough. When
 // importing Songloft's old storage.json the stale host usually still points at
 // the Songloft port; MIOT_SERVER_HOST_FORCE=true fixes that on first boot.
+// 用户在 .env 里自定义端口后，自动生成的 http://<LAN IP>:<端口> 形式的地址
+// 会跟随新端口；手填的域名 / 反向代理地址原样保留（与安装脚本的策略一致）。
 async function ensureServerHost() {
   if (!cfg.serverHost) return;
   let stored = {};
@@ -125,8 +132,20 @@ async function ensureServerHost() {
   if (!stored.server_host || cfg.forceServerHost) {
     stored.server_host = cfg.serverHost;
     await storage.set('config', JSON.stringify(stored));
-    log.info(`server_host=${cfg.serverHost}`);
+    log.info(`server_host=${cfg.serverHost} (init/force)`);
+    return;
   }
+  try {
+    const cur = new URL(String(stored.server_host));
+    const want = new URL(cfg.serverHost);
+    const isGenerated = cur.protocol === 'http:' && cur.hostname === want.hostname
+      && (cur.pathname === '/' || cur.pathname === '') && !cur.username && !cur.password;
+    if (isGenerated && cur.port !== want.port) {
+      log.warn(`server_host 端口 ${cur.port || '(默认)'} → ${want.port}（跟随 MIOT_PORT 变更）`);
+      stored.server_host = cfg.serverHost;
+      await storage.set('config', JSON.stringify(stored));
+    }
+  } catch { /* 非 URL 形式，保留用户配置 */ }
 }
 await ensureServerHost();
 
@@ -152,12 +171,17 @@ async function resolveFnToken(force) {
   }
 }
 
+// 通用网关发现：只在基址探测失败时触发，能通的实例不做任何扫描。
+const gateway = createGatewayDiscovery({ cfg, log });
+
 const fn = createFnMusicClient({
   baseUrl: cfg.fnBaseUrl,
   username: cfg.fnUsername,
   password: cfg.fnPassword,
   tokenProvider: resolveFnToken,
   log,
+  discoverGateway: gateway.discover,
+  onGatewayResolved: gateway.persist,
 });
 const music = createMusicAdapter({ fn, storage, log, cfg });
 installSongloft({ cfg, storage, music, log });
@@ -179,9 +203,10 @@ if (typeof globalThis.onInit !== 'function') {
 }
 await globalThis.onInit();
 
-const diagnostics = createDiagnostics({ cfg, storage, log });
+const diagnostics = createDiagnostics({ cfg, storage, log, gateway });
 await diagnostics.initFromConfig();
-const server = await startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log, diagnostics });
+const ports = createPorts({ cfg, log });
+const server = await startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log, diagnostics, ports });
 
 let shuttingDown = false;
 async function shutdown(signal) {

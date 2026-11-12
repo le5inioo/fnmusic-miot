@@ -5,18 +5,16 @@ import SettingRow from '../../ui/SettingRow.vue';
 import SlButton from '../../ui/SlButton.vue';
 import SlCheckbox from '../../ui/SlCheckbox.vue';
 import SlInput from '../../ui/SlInput.vue';
-import SlSelect from '../../ui/SlSelect.vue';
 import SlSwitch from '../../ui/SlSwitch.vue';
 import SlDisclosure from '../../ui/SlDisclosure.vue';
 import DLNAReceiverSettings from './DLNAReceiverSettings.vue';
+import PortSettings from './PortSettings.vue';
 import { postEnvelope } from '../../api';
 import { navigation } from '../../runtime';
 import { deviceId, deviceName, confirmAction, deleteGroup, loadAccountsAndDevices, loadGroups, messageOf, saveConfig, saveGroup, state, toggleManaged, notify } from '../../store';
-import type { DeviceGroup, DeviceMember, SelectOption } from '../../types';
+import type { DeviceGroup, DeviceMember } from '../../types';
 
 const authTab = ref<'qrcode' | 'password' | 'token'>('qrcode');
-const serverChoice = ref(state.config.server_host || '');
-const customHost = ref('');
 const username = ref('');
 const password = ref('');
 const tokenUserId = ref('');
@@ -40,19 +38,11 @@ let qrTimer: ReturnType<typeof setTimeout> | null = null;
 // 避免用户连点"获取二维码"时旧轮询链劫持新一轮（旧链 resolved 后用旧 account_id 重排）。
 let qrGen = 0;
 
-const hostOptions = computed<SelectOption[]>(() => [
-  ...(Array.isArray(state.config.suggested_addresses) ? state.config.suggested_addresses : []).map((value) => ({ value, label: value })),
-  { value: '__custom__', label: '自定义地址' },
-]);
-const isCustomHost = computed(() => serverChoice.value === '__custom__');
 const managed = computed(() => state.devices.flatMap((account) => account.devices.filter((device) => device.managed).map((device) => ({ accountId: account.account_id, device }))));
 const accountStatuses = computed(() => state.accounts);
 function isDeviceOnline(device: { online?: boolean; presence?: string }): boolean { return device.online === true || device.presence === 'online'; }
 
 onMounted(() => {
-  const suggested = Array.isArray(state.config.suggested_addresses) ? state.config.suggested_addresses : [];
-  serverChoice.value = suggested.includes(state.config.server_host) ? state.config.server_host : (state.config.server_host ? '__custom__' : '');
-  customHost.value = state.config.server_host;
   void Promise.all([loadAccountsAndDevices(), loadGroups()]);
 });
 watch(groupEditor, (open) => { navigation.editorOpen = open; });
@@ -62,36 +52,6 @@ onUnmounted(() => {
   stopQrPolling();
 });
 
-async function saveServerHost() {
-  const host = (isCustomHost.value ? customHost.value : serverChoice.value).trim();
-  if (!host) { notify('请选择或填写服务器地址', 'warning'); return; }
-  await saveConfig({ server_host: host });
-  state.config.server_host_status = host.includes('localhost') || host.includes('127.0.0.1') ? 'loopback' : 'ok';
-}
-async function autoFill() {
-  const origin = window.location.origin || `${window.location.protocol}//${window.location.host}`;
-  console.log('[autoFill] browser origin:', origin);
-  if (!origin || origin === 'null') {
-    console.warn('[autoFill] cannot detect browser origin');
-    notify('未检测到浏览器地址', 'warning');
-    return;
-  }
-  // 如果 origin 不在下拉列表的可选项中，切到自定义地址
-  const suggested = Array.isArray(state.config.suggested_addresses) ? state.config.suggested_addresses : [];
-  console.log('[autoFill] suggested addresses:', suggested);
-  if (suggested.includes(origin)) {
-    serverChoice.value = origin;
-  } else {
-    serverChoice.value = '__custom__';
-  }
-  customHost.value = origin;
-  const isLoopback = origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('::1') || origin.includes('[::1]');
-  if (isLoopback) {
-    notify('已填入浏览器地址，但 localhost/127.0.0.1 仅限本机调试，音箱无法访问', 'warning');
-  } else {
-    notify('已填入浏览器地址', 'info');
-  }
-}
 async function submitPassword() {
   if (!username.value.trim() || !password.value) { notify('请填写用户名和密码', 'warning'); return; }
   loginBusy.value = true;
@@ -224,13 +184,7 @@ async function toggleMusicApi(hardware: string, enabled: boolean): Promise<void>
 </script>
 
 <template>
-  <SectionCard title="服务器配置" icon="dns" description="音箱必须能访问这里填写的地址；localhost 和 127.0.0.1 只适合浏览器本机调试。">
-    <div class="form-body">
-      <div class="field"><label class="field-label">服务器地址</label><SlSelect v-model="serverChoice" :options="hostOptions" placeholder="选择服务器地址" allow-empty aria-label="服务器地址" /><SlInput v-if="isCustomHost" v-model="customHost" style="margin-top:8px" placeholder="例如 http://192.168.1.100:58091" aria-label="自定义服务器地址" /></div>
-      <div v-if="state.config.server_host_status !== 'ok'" class="field-help">{{ state.config.server_host_status === 'loopback' ? '当前地址为本地回环地址，音箱无法访问。' : '尚未配置可用地址。' }}</div>
-      <div class="field-actions"><SlButton variant="text" label="自动填充" icon="auto_fix_high" @click="autoFill" /><SlButton variant="filled" label="保存" icon="save" @click="saveServerHost" /></div>
-    </div>
-  </SectionCard>
+  <PortSettings />
 
   <SectionCard title="添加账号" icon="person_add" description="支持扫码、账号密码和手动 Token 三种登录方式。">
     <div class="tab-strip"><button :class="{ active: authTab === 'qrcode' }" @click="authTab = 'qrcode'">扫码登录</button><button :class="{ active: authTab === 'password' }" @click="authTab = 'password'">账号密码</button><button :class="{ active: authTab === 'token' }" @click="authTab = 'token'">手动 Token</button></div>

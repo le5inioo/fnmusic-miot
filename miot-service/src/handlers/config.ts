@@ -17,6 +17,21 @@ import { validateAIHeaders } from '../utils/ai_headers';
 
 const SEARCH_PRIORITIES: SearchPriority[] = ['parallel', 'local_first', 'external_first'];
 
+// 控制层端口从宿主 /compat/status 的 public_port 读取（来源 MIOT_PUBLIC_PORT），
+// 供面板「自动填充」在没有推荐地址时兜底；进程内只取一次，避免每次 /config 往返。
+let cachedControlPort = 0;
+async function readControlPort(): Promise<number> {
+  if (cachedControlPort) return cachedControlPort;
+  try {
+    const status = await callHostAPI<{ public_port?: number }>(
+      'GET', '/compat/status', undefined, { timeoutMs: 1500 },
+    );
+    const p = Number(status?.public_port);
+    if (Number.isFinite(p) && p > 0 && p <= 65535) cachedControlPort = p;
+  } catch { /* 宿主暂不可用时返回 0，前端仍可用服务端推荐地址 */ }
+  return cachedControlPort;
+}
+
 function normalizeSearchPriority(value: unknown): SearchPriority {
   return typeof value === 'string' && SEARCH_PRIORITIES.includes(value as SearchPriority)
     ? value as SearchPriority
@@ -87,6 +102,7 @@ export function registerConfigHandlers(
         success: true,
         data: {
           server_host: config.server_host,
+          control_port: await readControlPort(),
           conversation_monitor_enabled: config.conversation_monitor_enabled,
           voice_command_enabled: config.voice_command_enabled,
           voice_memory_enabled: config.voice_memory_enabled,

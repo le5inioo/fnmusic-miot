@@ -1,6 +1,6 @@
 import type { ChatStatus } from '../../src/chat/types';
 import { computed, reactive } from 'vue';
-import { del, get, messageOf, pluginWebSocketUrl, post, query } from './api';
+import { del, get, hostRequest, messageOf, pluginWebSocketUrl, post, query } from './api';
 import type {
   Account,
   AccountDevices,
@@ -25,6 +25,7 @@ import type {
 
 const defaultConfig: MiotConfig = {
   server_host: '',
+  control_port: 0,
   server_host_status: 'empty',
   suggested_addresses: [],
   conversation_monitor_enabled: false,
@@ -103,6 +104,8 @@ export const state = reactive({
   config: { ...defaultConfig } as MiotConfig,
   configLoaded: false,
   configSaving: false,
+  /** 首次安装 / 老版本升级后的服务端口引导是否待处理（宿主 .json 标记）。 */
+  portSetupPending: false,
   accounts: [] as Account[],
   devices: [] as AccountDevices[],
   groups: [] as DeviceGroup[],
@@ -958,7 +961,32 @@ export async function initialize(): Promise<void> {
   } finally {
     state.loading = false;
   }
+  // 首次安装 / 老版本升级引导：若宿主标记待处理，直接进入「设置 → 设备（服务端口）」。
+  void checkPortSetupGuide();
   connectDevicesInBackground();
+}
+
+/**
+ * 检查宿主侧端口引导标记（port_setup_state.json，由安装/升级脚本写入）。
+ * 命中时把面板直接带到「设置 → 设备（服务端口）」，让用户在引导页手动填写或一键填充
+ * 两个可用随机端口。检查失败只吞掉，主流程不因此受阻。
+ */
+async function checkPortSetupGuide(): Promise<void> {
+  try {
+    const cfg = await hostRequest<{ pending?: boolean }>('GET', '/ports/config');
+    if (cfg && cfg.pending) {
+      state.portSetupPending = true;
+      navigation.page = 'settings';
+      navigation.settingsCategory = 'device';
+    }
+  } catch {
+    /* 引导检查失败不阻断主流程；用户仍可在设置里手动找到该入口 */
+  }
+}
+
+/** 用户在引导页「应用端口」或「保持默认」后清除待处理状态。 */
+export function clearPortSetupPending(): void {
+  state.portSetupPending = false;
 }
 
 async function connectDevicesInBackground(): Promise<void> {

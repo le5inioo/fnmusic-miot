@@ -1,6 +1,6 @@
 #!/bin/bash
 # App Center start/stop/status for fnmusic-miot（原生部署：systemd 单元承载）。
-#   start  = 写单元、enable、restart，并等到 8775/8776 都就绪
+#   start  = 写单元、enable、restart，并等到 .env 配置的两个端口都就绪
 #   stop   = 停单元并清理网关 socket
 #   status = exit 0 running / exit 3 stopped
 set -uo pipefail
@@ -29,7 +29,8 @@ case "${1:-}" in
         fi
         if ! fnmusic_miot_wait_ready 25; then
             journalctl -u "${MIOT_UNIT_NAME}" -n 15 --no-pager >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
-            fnmusic_miot_fail_from_log "启动超时：控制层或控制台未在 25 秒内就绪"
+            echo "[fnmusic-miot] $(fnmusic_miot_ports_diagnosis)" >> "${FNMUSIC_MIOT_DURABLE_LOG}" 2>&1 || true
+            fnmusic_miot_fail_from_log "启动超时：控制层($(fnmusic_miot_control_port)) / 控制台($(fnmusic_miot_console_port)) 未在 25 秒内就绪；$(fnmusic_miot_ports_diagnosis)"
         fi
         exit 0
         ;;

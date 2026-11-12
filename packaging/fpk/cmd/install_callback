@@ -31,9 +31,15 @@ fi
 
 if ! fnmusic_miot_wait_ready 30; then
     journalctl -u "${MIOT_UNIT_NAME}" -n 20 --no-pager >> "${FNMUSIC_MIOT_LOG}" 2>&1 || true
+    echo "[fnmusic-miot] $(fnmusic_miot_ports_diagnosis)" >> "${FNMUSIC_MIOT_DURABLE_LOG}" 2>&1 || true
     fnmusic_miot_remove_unit
-    fnmusic_miot_fail_from_log "安装失败：控制层(8775)或控制台(8776)未在 30 秒内就绪"
+    fnmusic_miot_fail_from_log "安装失败：控制层($(fnmusic_miot_control_port)) / 控制台($(fnmusic_miot_console_port)) 未在 30 秒内就绪；$(fnmusic_miot_ports_diagnosis)"
 fi
 
 echo "[fnmusic-miot] 安装完成 node=${NODE_BIN} unit=${MIOT_UNIT_NAME}" >> "${FNMUSIC_MIOT_LOG}"
+
+# 首次安装引导：面板首次打开直接跳到「设置 → 服务端口」，让用户确认/填写端口。
+fnmusic_miot_write_port_guide_pending "fresh-install" ""
+fnmusic_miot_record_version
+
 exit 0

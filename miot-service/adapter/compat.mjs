@@ -135,9 +135,9 @@ export function createCompatHandler({ fn, music, cfg, log, storage }) {
         push_ok: !lastError,
         last_error: lastError,
         nas_ip: process.env.FNMUSIC_NAS_IP || url.hostname,
-        // 宿主发布端口，不是容器内监听端口（容器 8006 -> 宿主 8775）。
-        // 写错会让管理台把音箱地址拼成 8006，音箱根本连不上。
-        public_port: Number(cfg.publicPort || 8775),
+        // 发布端口：自定义 MIOT_PORT 时由安装脚本对齐 MIOT_PUBLIC_PORT。
+        // 写错会让管理台把音箱地址拼成错误的端口，音箱根本连不上。
+        public_port: Number(cfg.publicPort || cfg.port),
         fnmusic_base_url: fn.baseUrl,
         gateway: 'miot-fnos',
         // 没装 fnmusic-ext 时为空串；控制台据此给一次非阻断提示。

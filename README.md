@@ -66,9 +66,38 @@ npm run build:all
 
 - 语音口令、设备绑定、播放偏好等均在控制台 UI 内配置，持久化于应用数据目录
 - 无 `fnmusic-ext` 时：在线榜单与在线流自动隐藏，其余功能不受影响
-- 调试端点：`http://<NAS>:8775/compat/status`、`/compat/library-search?q=关键词`
+- 调试端点：`http://<NAS>:<MIOT_PORT>/compat/status`、`/compat/library-search?q=关键词`
+- **端口可自定义**：控制层默认 `8775`、控制台 TCP 网关默认 `8776`。**从 2.3.4 起，自定义端口无需再手改 `.env`**——在「设置 → 设备 → 服务端口」中即可手动填两个端口、或点「自动填充」一次选好两个可用随机端口、应用后自动重启服务（`/ports/apply` 会先备份 `.env` 到 `.env.before-port-apply` 再写入并延迟重启，避免当前请求被 `systemctl restart` 杀死）。若两个默认端口恰好被其他程序占用，安装时会自动避开并挑选空闲端口，仍会在首次引导里让用户确认。升级不会覆盖自定义值，音箱回访地址、网关反代端口、探活检查都会自动跟随。直接改 `.env`（`MIOT_PORT` / `FNMUSIC_MIOT_CONSOLE_PORT`，1024~65535、两者不同）后重启应用也完全有效。桌面入口走 unix socket，不受 TCP 端口影响（详见「更新记录 2.3.3 / 2.3.4」）。
+- **首次安装 / 老版本升级引导**：从 2.3.4 起，全新安装或从 2.3.4 之前的版本升级后，面板首次打开会直接跳到「设置 → 设备」（顶部即「服务端口」区块），提示用户确认或自定义两个端口（安装/升级脚本写入 `port_setup_state.json` 的 `pending` 标记，前端 `initialize()` 读取 `/ports/config` 后跳转）；在引导卡上点「保持默认并跳过引导」即清除标记，引导卡随之收起、不再常驻。该引导对功能无强制要求——跳过或保持默认都不影响使用。
+- **飞牛网关端口自动发现（2.3.4 起，不依赖任何端口白名单）**：不同 NAS 的飞牛 HTTP 网关端口可能各不相同（`6688` / `5666` / `51666` / 任意自定义值）。2.3.4 会自动从系统网关配置与本机监听端口中找出真实网关，无需手填；网关只绑定 LAN IP、不监听回环时也会自动切换。只有「当前基址探测失败」才触发发现，配置正确的实例零扫描、零行为变化。排查请看「设置 → 工具箱 → 导出诊断日志」新增的「环境 / 网关发现」脱敏段。特殊场景（强制 HTTPS 自签、域名反向代理）可在 `.env` 手填 `FNMUSIC_BASE_URL`，手填的自定义地址不会被覆盖。
 
 ## 更新记录
+
+### 2.3.4
+
+- **修复「飞牛网关端口不是 6688 就连不上」：通用网关自动发现**（来自两份 2.3.2 用户 debug 日志与 5666/51666 用户的反馈）。
+  - **根因**：`/usr/trim/etc/network_gateway_setting.conf` 实际是 JSON（`{"schema":{"http":{"port":6688},...}}`），而安装脚本用 `sed` 匹配字面 `schema.http.port` —— **从未命中**，端口永远回落 6688；`.env` 里已写错的 `FNMUSIC_BASE_URL` 又因 `_miot_env_add`「只补缺失」在升级时不被纠正。结果后端一直连不存在的端口，日志满屏 `[fnmusic-token] ... Errno 111 Connection refused` + `base url probe failed: fetch failed`。2.3.0 那套「四层防御」针对的是 `Errno 101`（网络未就绪），对不上症；两份日志里 `Errno 101` 均为 0。
+  - **修复（对任意端口成立，无端口白名单）**：新增 `host/gateway.mjs` —— ① 解析网关配置（JSON / `key=value` / ini 三种格式，任意端口，http 优先）；② 兜底扫描 `/proc/net/tcp{,6}` 全部 LISTEN 端口 × 回环与本机所有 IPv4，用 `GET /music/api/v1/initialization/state` 的 `200 + application/json + code` 特征**精确识别**，普通 HTML 服务 / 无 `code` 字段的 JSON 服务不会被误判；③ 只在现有基址探测失败时触发，命中后运行时切换并条件写回 `.env`（仅覆盖自动生成的回环 / 本机 IP 地址，用户手填域名、反向代理、带路径地址一律不动）。
+  - **安装脚本同步**：conf 解析改为 JSON-aware；`FNMUSIC_GATEWAY_PORT` / `FNMUSIC_BASE_URL` 写入不再依赖 LAN IP 探测成功；conf 解析成功时对齐端口并纠正历史错误基址；安装日志记录 `gateway=<port>/conf|default`。每次发现重新读 conf 与 LISTEN 列表，运行期改端口也能跟上。
+  - **诊断日志导出**新增「环境 / 网关发现」脱敏段：`FNMUSIC_BASE_URL`、网关端口、conf 解析结果、LISTEN 端口数、写回状态、最近一次自动发现结果。以后这类问题一眼定案，不必再靠猜（旧版导出只有 `miot.log` / `console.log`，看不到 `.env`）。
+  - **用户侧无需操作**：升级后若基址错误，服务启动约 2 秒内自动发现并纠正；仍连不上时先按上面「导出诊断日志」看环境段，再检查网关是否只绑 LAN IP / 是否强制 HTTPS。
+- **「设置 → 设备 → 服务端口」可视化入口 + 首次安装/升级引导**（原需 SSH 改 `.env` 才能自定义端口）。
+  - 在「设置 → 设备」页顶部新增「服务端口」区块（替代原「服务器配置」卡片）：显示当前控制层/控制台端口；支持**手动填两个端口**（校验 1024~65535、互不相同、不与当前飞牛网关端口（由 `/ports/config` 动态下发）冲突、避开系统预留 8774）、**一键自动填充两个可用随机端口**（`GET /ports/suggest`，服务端读 `/proc/net/tcp*` + `net.createServer` 兜底盲选 10000~31000 空闲端口）、**保存并应用**（`POST /ports/apply`，写 `.env` → 备份 `.env.before-port-apply` → `systemd-run` 延迟重启服务）、**保持默认并跳过引导**。
+  - 首次安装 / 从 2.3.4 之前版本升级后，前端 `initialize()` 调用 `GET /ports/config`，若宿主标记 `pending` 即自动跳到「设置 → 设备」，并在该分类上显示「待设置」状态条（引导页即为设备页顶部的「服务端口」区块）。引导标记存于 `<数据目录>/port_setup_state.json`（`pending` / `reason` / `from_version`）；安装/升级回调据此写入。
+  - 应用后若用户是从局域网 TCP 直连控制台（`window.location.port` 与旧控制台端口一致），前端会提示「在新地址打开控制台」并给出跳转链接；非直连（经桌面 socket 或飞牛内嵌）则提示刷新页面。
+  - 后端新增宿主级 `host/ports.mjs`（不经插件 QuickJS），注册 `GET /ports/config`、`GET /ports/suggest`、`POST /ports/apply`、`POST /ports/setup-done`；前端新增 `hostRequest()` 助手绕过 plugin 响应 `.data` 解包。延迟重启用 `systemd-run --no-block --collect --unit=fnmusic-miot-port-apply` 脱离当前 systemd 单元 cgroup，避免重启把当前 HTTP 响应一起杀掉。
+  - 安装/升级脚本（`packaging/fpk/cmd/_common`）新增 `MIOT_PORT_GUIDE_SINCE="2.3.4"`、`fnmusic_miot_version_lt`、`fnmusic_miot_record_version`、`fnmusic_miot_write_port_guide_pending`、`fnmusic_miot_pick_if_occupied`：默认端口被占用时自动挑选空闲端口（`env_setup` 内，仅 fresh-install 走默认端口时触发），`check_ports_preinstall` 对「fresh-install + 被占用的是默认端口」改为告警放行让自动避让接管。`install_callback` / `upgrade_callback` 写 `pending` 标记并记录版本。
+  - **注意**：fnOS 应用中心的升级实际走「卸载 → 重装」，生命周期总是执行 `install_callback` 而非 `upgrade_callback`，因此现网升级后 `reason` 显示为 `fresh-install`（功能上仍正确触发首次启动引导跳转），引导文案不依赖 reason 文案，无需特殊处理。
+  - **UI 细节（同属 2.3.4）**：「修改端口」里两个端口输入框与「**自动填充**」在桌面端**三者等宽**同排（grid `repeat(3, minmax(0, 1fr))`，`minmax(0,…)` 保证永不撑破容器），窄屏（≤599px，手机）自动换行为「两输入框并排 + 自动填充整行」，不再把「设备」子页面撑出横向拖动；「设置 → 设备 → DLNA 接收器」的「插件入口已关闭 / 总开关已关闭 / 等待投放」等运行状态文字统一移到「保存接收器设置」按钮**后面同一行**（多个接收器时带名称前缀，窄屏自动换行）；「**待设置**」徽标移到「首次端口设置引导」标题行（`SectionCard` 的 `#actions` 插槽），「**保持默认并跳过引导**」改为与「保存并应用」一致的填充按钮，且引导卡用 `SectionCard` 新增的 `flat` 模式去掉卡片描边（否则 `padding:0` 的卡片边框会紧贴按钮，看起来像按钮外多一圈灰框），点击后整张引导卡收起；「当前端口」不再显示回访 / 控制台地址行；设置相关可见文案中的 Songloft 统一改为 **Miot**（DLNA 默认名、故障与说明文案、以及 DLNA `manufacturer` / SSDP `SERVER` 标识）；安装向导提示精简为「安装前请确认」三点（依赖 / 可选增强 / 首次端口）。
+
+### 2.3.3
+
+- **8775 / 8776 全面支持用户自定义**：端口不再是硬编码默认值，`.env` 成为唯一数据源。
+  - `MIOT_PORT`（控制层监听，默认 8775）与 `FNMUSIC_MIOT_CONSOLE_PORT`（控制台 TCP 网关，默认 8776）可直接修改，范围 1024~65535 且互不相同；安装/升级不再覆盖用户值（仅识别到 1.0.0 容器版遗留 `.env` 特征时才回落默认），`MIOT_PUBLIC_PORT` / `MIOT_UPSTREAM_PORT` / `MIOT_SERVER_HOST` 由安装脚本自动对齐，storage 里自动生成的 `server_host` 也会跟随端口变化，手工填的域名/反向代理地址保持不动。
+  - `fnmusic_miot_wait_ready`、安装/升级/启动的超时文案全部按实际端口动态化；`install_init` 增加端口占用预检（能明确判定占用者不是本应用旧实例时提前报错），启动失败时额外输出「哪个端口被哪个进程占用」的诊断，不再只有笼统的「启动超时」。
+  - `EADDRINUSE` 时控制台网关给出改端口指引，`runtime` 把重启退避拉长到 30 秒并打印明确提示，不再每 2 秒空转；前端「自动填充」的兜底端口改由服务端 `/config` 下发 `control_port`（来源 `MIOT_PUBLIC_PORT`），自定义端口下也不会误填 8775。
+  - 桌面入口走 `fnmusic-miot.sock` unix socket，与 TCP 端口无关；安装向导与 README 同步补充端口说明。
+- **修复「服务器地址 → 自动填充」误填飞牛网关端口**：该字段是音箱回访 miot 控制层的地址（`http://<NAS IP>:<MIOT_PORT>`），但旧实现直接取 `window.location.origin`。面板内嵌在飞牛音乐页面时浏览器 origin 是 `6688`（飞牛音乐 HTTP 网关，后端访问曲库用），从控制台网关打开时是控制台端口，两者都不是播放接口；保存后音箱会拿到错误地址而无法播放。现在优先采用后端 `suggested_addresses` 中的完整服务地址（来自 `MIOT_SERVER_HOST`），无推荐地址时兜底用浏览器主机名 + 服务端下发的控制层端口，并对回环地址给出警告。
 
 ### 2.3.2
 
