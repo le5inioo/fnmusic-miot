@@ -189,9 +189,11 @@ function mergePlayParams(searchParams, opts) {
   return params;
 }
 
-const ACCESS_LOG = process.env.FNMUSIC_MIOT_ACCESS_LOG !== '0';
+// 推流访问日志（[ACCESS]）跟随全局调试开关（diagnostics 状态），不再固定开启；
+// 见 host/diagnostics.mjs 与工具箱「调试与诊断」。
 
-export async function startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log }) {
+export async function startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log, diagnostics }) {
+  const accessLogEnabled = () => (diagnostics ? diagnostics.accessLogEnabled() : true);
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://localhost');
     let pathname = url.pathname;
@@ -221,9 +223,9 @@ export async function startServer({ cfg, streamHandler, coverHandler, lyricHandl
           : Object.fromEntries(url.searchParams.entries());
         const __t0 = Date.now();
         const __tok = url.searchParams.get('access_token') || '';
-        if (ACCESS_LOG) console.log(`[ACCESS] in id=${idOrGuid} method=${req.method} seek=${playParams.seek || 0} fmt=${playParams.format || ''} range=${req.headers.range || '-'} from=${req.socket.remoteAddress} ua=${String(req.headers['user-agent'] || '').slice(0, 24)} tokenLen=${__tok.length} tokenOk=${__tok === cfg.token}`);
+        if (accessLogEnabled()) console.log(`[ACCESS] in id=${idOrGuid} method=${req.method} seek=${playParams.seek || 0} fmt=${playParams.format || ''} range=${req.headers.range || '-'} from=${req.socket.remoteAddress} ua=${String(req.headers['user-agent'] || '').slice(0, 24)} tokenLen=${__tok.length} tokenOk=${__tok === cfg.token}`);
         if (!authorized(req, url, cfg)) {
-          if (ACCESS_LOG) console.log(`[ACCESS] DENY 401 id=${idOrGuid}`);
+          if (accessLogEnabled()) console.log(`[ACCESS] DENY 401 id=${idOrGuid}`);
           res.writeHead(401); res.end('unauthorized'); return;
         }
         const result = await streamHandler({
@@ -232,7 +234,7 @@ export async function startServer({ cfg, streamHandler, coverHandler, lyricHandl
           params: playParams,
           method: req.method,
         });
-        if (ACCESS_LOG) {
+        if (accessLogEnabled()) {
           const __h = result.headers || {};
           console.log(`[ACCESS] out id=${idOrGuid} status=${result.statusCode} CL=${__h['content-length'] || '-'} CR=${__h['content-range'] || '-'} AR=${__h['accept-ranges'] || '-'} probeMs=${Date.now() - __t0}`);
         }
@@ -245,7 +247,7 @@ export async function startServer({ cfg, streamHandler, coverHandler, lyricHandl
           // event on the Readable and can take down the whole process.
           result.stream.on('error', (err) => {
             if (!res.writableEnded) res.destroy();
-            if (ACCESS_LOG) console.log(`[ACCESS] stream closed id=${idOrGuid}: ${err.message}`);
+            if (accessLogEnabled()) console.log(`[ACCESS] stream closed id=${idOrGuid}: ${err.message}`);
           });
           result.stream.pipe(res);
         } else res.end(result.body ?? '');
@@ -270,6 +272,38 @@ export async function startServer({ cfg, streamHandler, coverHandler, lyricHandl
         const result = await coverHandler({ id: coverMatch[1] });
         res.writeHead(result.statusCode, result.headers || {});
         if (result.stream) result.stream.pipe(res); else res.end(result.body ?? '');
+        return;
+      }
+
+      // 2d) 诊断端点（宿主级，Node 直接处理，不走插件 QuickJS）：
+      //     GET  /diagnostics/logs     导出运行日志（text/plain 附件）
+      //     POST /diagnostics/debug-mode  同步全局调试开关（门控 [ACCESS] 日志）
+      //     控制台 8776 网关会把 /app/fnmusic-miot/* 反代到这里并注入 token。
+      if (pathname === '/diagnostics/debug-mode' && diagnostics) {
+        if (!authorized(req, url, cfg)) { res.writeHead(401); res.end('unauthorized'); return; }
+        if (req.method !== 'POST') { res.writeHead(405, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'method not allowed' })); return; }
+        try {
+          const raw = await collectBody(req);
+          const body = raw ? JSON.parse(raw) : {};
+          diagnostics.setDebugMode(!!body.enabled);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, enabled: diagnostics.accessLogEnabled() }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: String(err?.message || err) }));
+        }
+        return;
+      }
+      if (pathname === '/diagnostics/logs' && diagnostics) {
+        if (!authorized(req, url, cfg)) { res.writeHead(401); res.end('unauthorized'); return; }
+        if (req.method !== 'GET') { res.writeHead(405, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'method not allowed' })); return; }
+        const result = await diagnostics.exportLogs({ lines: url.searchParams.get('lines') });
+        res.writeHead(200, {
+          'Content-Type': 'text/plain; charset=utf-8',
+          'Content-Disposition': `attachment; filename="${diagnostics.attachmentName()}"`,
+          'Cache-Control': 'no-store',
+        });
+        res.end(result.body);
         return;
       }
 

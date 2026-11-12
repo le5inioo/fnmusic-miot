@@ -328,6 +328,13 @@ export function registerConfigHandlers(
       if (body.debug_log_enabled !== undefined) {
         config.debug_log_enabled = !!body.debug_log_enabled;
         setDebugLog(config.debug_log_enabled);
+        // 全局开关：通知宿主（Node 侧）同步门控推流 [ACCESS] 访问日志。
+        // 失败不影响配置保存——宿主重启后也会从 storage 读初始值。
+        try {
+          await callHostAPI('POST', '/diagnostics/debug-mode', { enabled: config.debug_log_enabled });
+        } catch (e) {
+          songloft.log.warn('[config] sync debug-mode to host failed: ' + String(e));
+        }
       }
 
       if (body.hourly_chime_resume_enabled !== undefined) {

@@ -43,6 +43,7 @@ const uiIconCodePoints: Record<string, number> = {
   auto_awesome: 0xe65f,
   auto_fix_high: 0xe663,
   bedtime: 0xf159,
+  bug_report: 0xe868,
   campaign: 0xef49,
   check: 0xe668,
   chevron_right: 0xe5cc,

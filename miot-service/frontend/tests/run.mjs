@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const frontendRoot = path.resolve(new URL('..', import.meta.url).pathname);
+// URL.pathname 在 Windows 会得到 "/C:/..."，必须用 fileURLToPath 转换
+const frontendRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const sourceRoot = path.join(frontendRoot, 'src');
 const read = (file) => fs.readFileSync(path.join(sourceRoot, file), 'utf8');
 

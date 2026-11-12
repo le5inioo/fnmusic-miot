@@ -15,6 +15,7 @@ import { installHostFetch } from './fetch.mjs';
 import { createStorage } from './storage.mjs';
 import { installSongloft } from './songloft.mjs';
 import { startServer } from './server.mjs';
+import { createDiagnostics } from './diagnostics.mjs';
 import { createFnMusicClient } from '../adapter/fnmusic.mjs';
 import { createMusicAdapter } from '../adapter/songs.mjs';
 import { createStreamHandler, createCoverHandler, createLyricHandler } from '../adapter/stream.mjs';
@@ -98,6 +99,8 @@ const cfg = {
   ffmpeg: process.env.FFMPEG_BIN || '/usr/bin/ffmpeg',
   ffprobe: process.env.FFPROBE_BIN || '/usr/bin/ffprobe',
   maxTranscodes: Number(process.env.MIOT_MAX_TRANSCODES || 2),
+  // 诊断信息用：仓库根（miot-service 的上一级），VERSION 在那里
+  repoRoot: path.dirname(ROOT),
 };
 
 const log = {
@@ -176,7 +179,9 @@ if (typeof globalThis.onInit !== 'function') {
 }
 await globalThis.onInit();
 
-const server = await startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log });
+const diagnostics = createDiagnostics({ cfg, storage, log });
+await diagnostics.initFromConfig();
+const server = await startServer({ cfg, streamHandler, coverHandler, lyricHandler, compat, log, diagnostics });
 
 let shuttingDown = false;
 async function shutdown(signal) {

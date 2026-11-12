@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import SectionCard from '../../ui/SectionCard.vue';
+import SettingRow from '../../ui/SettingRow.vue';
 import SlButton from '../../ui/SlButton.vue';
 import SlInput from '../../ui/SlInput.vue';
 import SlStatusChip from '../../ui/SlStatusChip.vue';
 import SlEmptyState from '../../ui/SlEmptyState.vue';
-import { currentDevice, deviceName, messageOf, notify, playerCommand, state } from '../../store';
+import SlSwitch from '../../ui/SlSwitch.vue';
+import { hostPathPrefix } from '../../api';
+import { currentDevice, deviceName, messageOf, notify, playerCommand, saveConfig, state } from '../../store';
 
 const url = ref('https://lhttp.qtfm.cn/live/4915/64k.mp3');
 const text = ref('');
@@ -33,6 +36,43 @@ async function repeatText(content: string): Promise<boolean> {
 async function sendText() {
   const draft = text.value;
   if ((await repeatText(draft)) && text.value === draft) text.value = '';
+}
+
+// ---- 调试与诊断 ----
+
+const debugExporting = ref(false);
+
+function setDebugLogEnabled(enabled: boolean): void {
+  void saveConfig({ debug_log_enabled: enabled });
+}
+
+/** 导出控制层运行日志（服务端拼装文本，浏览器触发下载）。 */
+async function exportDiagnostics(): Promise<void> {
+  if (debugExporting.value) return;
+  debugExporting.value = true;
+  try {
+    const token = window.SongloftPlugin?.getAuthToken?.() || '';
+    const resp = await fetch(`${hostPathPrefix()}/diagnostics/logs?lines=2000`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!resp.ok) throw new Error(`导出失败 (${resp.status})`);
+    const disposition = resp.headers.get('content-disposition') || '';
+    const match = disposition.match(/filename="?([^";]+)"?/i);
+    const filename = match ? match[1] : `fnmusic-miot-diag-${Date.now()}.log`;
+    const blobUrl = URL.createObjectURL(await resp.blob());
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+    notify('诊断日志已导出', 'success');
+  } catch (error) {
+    notify(messageOf(error), 'error');
+  } finally {
+    debugExporting.value = false;
+  }
 }
 </script>
 
@@ -126,6 +166,36 @@ async function sendText() {
         description="文字播报结果和操作失败信息会显示在这里。"
         icon="terminal"
       />
+    </div>
+  </SectionCard>
+  <SectionCard
+    title="调试与诊断"
+    icon="bug_report"
+    description="遇到 bug 时：先打开调试日志 → 复现问题（记下大概时间）→ 导出日志发给开发者。"
+  >
+    <div class="form-body">
+      <SettingRow
+        title="全局调试日志"
+        subtitle="开启后控制层输出音箱推流访问日志与会话轮询诊断日志；日常使用建议关闭"
+      >
+        <SlSwitch
+          aria-label="全局调试日志"
+          :model-value="state.config.debug_log_enabled"
+          @update:model-value="setDebugLogEnabled"
+        />
+      </SettingRow>
+      <div class="field-actions">
+        <SlButton
+          variant="outlined"
+          label="导出诊断日志"
+          icon="download"
+          :disabled="debugExporting"
+          @click="exportDiagnostics"
+        />
+      </div>
+      <p class="field-help">
+        导出内容为控制层与控制台网关最近 2000 行运行日志及版本信息；日志中可能包含设备或账号 ID，请仅提供给开发者用于排查。
+      </p>
     </div>
   </SectionCard>
 </template>

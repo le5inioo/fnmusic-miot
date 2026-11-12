@@ -70,6 +70,17 @@ npm run build:all
 
 ## 更新记录
 
+### 2.3.2
+
+- **修复 4 个图标空白**：UI 图标子集字体 `miot-ui-icons.otf` 缺少 `bug_report`、`cloud_off`、`delete_sweep`、`inbox` 的字形（该字体按码点渲染、无连字兜底，映射了码点但字形缺失即渲染为空白）。从官方 Material Symbols Outlined 可变字体重新子集化（固定 FILL=0/GRAD=0/opsz=24/wght=400），覆盖 `SlIcon` 码点表全部 75 个码点，75/75 全部命中。涉及：工具箱「调试与诊断」卡片图标、「歌曲加载失败」空态图标、操作记录空态图标、清空记忆/清空按钮图标。
+
+### 2.3.1
+
+- **工具箱新增「调试与诊断」**：
+  - 全局调试日志开关（控制 `debug_log_enabled`）：开启后控制层输出会话轮询诊断日志，同时门控 Node 侧的音箱推流 `[ACCESS]` 访问日志（插件保存配置后经 `/diagnostics/debug-mode` 通知宿主，宿主重启后从配置读初始值；环境变量 `FNMUSIC_MIOT_ACCESS_LOG=0/1` 可强制关闭/开启）。日常使用建议关闭以减少日志噪音。
+  - 诊断日志导出按钮（`GET /diagnostics/logs?lines=N`）：服务端拼装控制层与控制台网关日志文件（`<数据目录>/logs/miot.log|console.log` 及其 `.1` 轮转）尾部各 N 行（默认 2000，上限 20000）加版本 / 运行环境信息，以 text/plain 附件下载，不依赖 journalctl，原生与容器部署行为一致。
+- 前端测试运行器在 Windows 上因 `URL.pathname` 路径格式无法启动，改用 `fileURLToPath` 转换（Linux 行为不变）。
+
 ### 2.3.0
 
 正式版汇总（吸收 2.2.2 ~ 2.2.13 的全部内部迭代）：
