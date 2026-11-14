@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { nativeFetch } from './fetch.mjs';
+import { gatewayFetch, tlsPolicy } from './gateway-fetch.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // host/ → miot-service/ → repo/
@@ -62,14 +62,19 @@ export function localIPv4s() {
  */
 export function confPorts(confPath = process.env.FNMUSIC_GATEWAY_CONF || DEFAULT_CONF) {
   let text = '';
-  try { text = fs.readFileSync(confPath, 'utf8'); } catch { return { ports: [], readable: false, path: confPath }; }
+  const empty = { ports: [], httpPorts: [], httpsPorts: [], forceHttps: false, readable: false, path: confPath };
+  try { text = fs.readFileSync(confPath, 'utf8'); } catch { return empty; }
   const ports = [];
+  const httpsPorts = [];
+  let forceHttps = false;
   try {
     const j = JSON.parse(text);
     const httpPort = parsePort(j?.schema?.http?.port);
     const httpsPort = parsePort(j?.schema?.https?.port);
     if (httpPort) ports.push(httpPort);
-    if (httpsPort) ports.push(httpsPort);
+    if (httpsPort) { ports.push(httpsPort); httpsPorts.push(httpsPort); }
+    // fnOS 实际配置形如 {"force_https":false,"redirect":true}；也兼容字符串/数字写法。
+    forceHttps = /^(1|true|yes|on)$/i.test(String(j?.force_https ?? ''));
     const walk = (node, depth = 0) => {
       if (!node || typeof node !== 'object' || depth > 6) return;
       for (const [k, v] of Object.entries(node)) {
@@ -88,7 +93,17 @@ export function confPorts(confPath = process.env.FNMUSIC_GATEWAY_CONF || DEFAULT
     const p = parsePort(m[1]);
     if (p) ports.push(p);
   }
-  return { ports: uniq(ports).filter((p) => p >= 1024).slice(0, 20), readable: true, path: confPath };
+  if (!forceHttps && /["']?force_https["']?\s*[:=]\s*["']?(1|true|yes|on)\b/i.test(text)) forceHttps = true;
+  const all = uniq(ports).filter((p) => p >= 1024).slice(0, 20);
+  const secure = uniq(httpsPorts).filter((p) => p >= 1024);
+  return {
+    ports: all,
+    httpPorts: all.filter((p) => !secure.includes(p)),
+    httpsPorts: secure,
+    forceHttps,
+    readable: true,
+    path: confPath,
+  };
 }
 
 /** /proc/net/tcp{,6} 中所有 LISTEN(0A) 端口。 */
@@ -108,35 +123,44 @@ export function listeningPorts() {
   return [...out].sort((a, b) => a - b);
 }
 
-/** 单个候选：拿到飞牛音乐特征响应才算命中。 */
-async function probeBase(host, port) {
-  const base = `http://${host}:${port}`;
-  try {
-    const r = await nativeFetch(base + PROBE_PATH, {
-      redirect: 'follow',
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      headers: { Accept: 'application/json' },
-    });
-    if (r.status !== 200 && r.status !== 401 && r.status !== 403) return null;
-    if (!/json/i.test(r.headers.get('content-type') || '')) return null;
-    const body = await r.text();
-    let parsed;
-    try { parsed = JSON.parse(body); } catch { return null; }
-    if (!parsed || typeof parsed !== 'object' || !('code' in parsed)) return null;
-    return base;
-  } catch {
-    return null;
+/**
+ * 单个候选：HTTP 与 HTTPS 都试，并吸收「强制 HTTPS」的 301。
+ * gatewayFetch 会自动跟随网关自身的协议/端口升级（内网 HTTPS 自签证书定向
+ * 放行），返回的 gatewayBase 就是最终生效的 origin，可能带 https + 新端口。
+ */
+async function probeBase(host, port, lanIps) {
+  for (const scheme of ['http', 'https']) {
+    const base = `${scheme}://${host}:${port}`;
+    let r;
+    try {
+      r = await gatewayFetch(base + PROBE_PATH, {
+        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+        headers: { Accept: 'application/json' },
+      }, { lanIps });
+    } catch { continue; }
+    if (r.status !== 200 && r.status !== 401 && r.status !== 403) continue;
+    if (!/json/i.test(r.headers.get('content-type') || '')) continue;
+    let body;
+    try { body = await r.text(); } catch { continue; }
+    try {
+      const parsed = JSON.parse(body);
+      if (!parsed || typeof parsed !== 'object' || !('code' in parsed)) continue;
+    } catch { continue; }
+    const finalBase = r.gatewayBase || base;
+    let finalPort = port;
+    try { finalPort = Number(new URL(finalBase).port) || port; } catch { /* 保持原端口 */ }
+    return { baseUrl: finalBase, host, port: finalPort };
   }
+  return null;
 }
 
 /** 分批并发探测，命中即返回（不等待同批剩余请求）。 */
-async function firstHit(pairs, source, counter) {
+async function firstHit(pairs, source, counter, lanIps) {
   for (let i = 0; i < pairs.length; i += CONCURRENCY) {
     const batch = pairs.slice(i, i + CONCURRENCY);
     const results = await Promise.all(batch.map(async ({ host, port }) => {
       counter.tried += 1;
-      const base = await probeBase(host, port);
-      return base ? { baseUrl: base, host, port } : null;
+      return await probeBase(host, port, lanIps);
     }));
     const hit = results.find(Boolean);
     if (hit) return { ...hit, source };
@@ -247,6 +271,9 @@ export function createGatewayDiscovery({ cfg, log = console }) {
     // 阶段 3：本机所有 LISTEN 端口 × 回环（覆盖 conf 缺失 / 改版 / 自定义端口）
     // 阶段 4：同上 × LAN IP（覆盖网关只绑 LAN 地址、不监听回环）
     const phases = [
+      // 强制 HTTPS 时优先试 conf 里的 HTTPS 端口，省掉每个端口的 HTTP 301 往返。
+      ...(conf.forceHttps && conf.httpsPorts.length
+        ? [{ source: 'conf-https', ports: conf.httpsPorts, hosts: allHosts }] : []),
       { source: 'conf', ports: conf.ports, hosts: allHosts },
       { source: 'env', ports: envPort ? [envPort] : [], hosts: allHosts },
       { source: 'listen-loopback', ports: pool, hosts: ['127.0.0.1'] },
@@ -257,7 +284,7 @@ export function createGatewayDiscovery({ cfg, log = console }) {
       if (!phase.ports.length || !phase.hosts.length) continue;
       const pairs = [];
       for (const port of phase.ports) for (const host of phase.hosts) pairs.push({ host, port });
-      hit = await firstHit(pairs, phase.source, counter);
+      hit = await firstHit(pairs, phase.source, counter, lanIps);
       if (hit) break;
     }
 
@@ -274,7 +301,7 @@ export function createGatewayDiscovery({ cfg, log = console }) {
     if (result.ok) {
       log.info(`[gateway] 发现飞牛网关 ${result.baseUrl} (来源=${result.source}, 探测=${result.tried} 次, ${result.elapsedMs}ms)`);
     } else {
-      log.warn(`[gateway] 未发现可用网关（${result.tried} 个候选，conf=${conf.ports.join(',') || '未读到'}，LISTEN=${listen.length} 个）`);
+      log.warn(`[gateway] 未发现可用网关（${result.tried} 个候选，conf=${conf.ports.join(',') || '未读到'}，force_https=${conf.forceHttps}，LISTEN=${listen.length} 个）`);
     }
     return result;
   }
@@ -317,6 +344,9 @@ export function createGatewayDiscovery({ cfg, log = console }) {
       confPath: state.conf.path,
       confReadable: state.conf.readable,
       confPorts: state.conf.ports,
+      confHttpsPorts: state.conf.httpsPorts,
+      forceHttps: state.conf.forceHttps,
+      tlsPolicy: tlsPolicy(state.runtime),
       listenPortCount: state.listen.length,
       lanIps,
       selfPorts: [...selfPorts],

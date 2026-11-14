@@ -13,7 +13,7 @@ import { spawn } from 'node:child_process';
 import { Readable } from 'node:stream';
 import fs from 'node:fs';
 import path from 'node:path';
-import { nativeFetch } from '../host/fetch.mjs';
+import { gatewayFetch } from '../host/gateway-fetch.mjs';
 import { API_BASE } from './fnmusic.mjs';
 
 // Formats a XiaoAI speaker can decode without help. Anything else goes
@@ -357,7 +357,7 @@ export function createCoverHandler({ fn, music, log }) {
       await fn.login();
       const path = '/static/cover';
       const query = { coverId: String(coverId) };
-      const r = await nativeFetch(
+      const r = await gatewayFetch(
         fn.baseUrl + API_BASE + path + `?coverId=${encodeURIComponent(String(coverId))}`,
         {
           headers: {

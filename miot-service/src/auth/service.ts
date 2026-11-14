@@ -251,8 +251,56 @@ export class AuthService {
       // 关键步骤：用真实 userId 作为账号 ID（与 Go 版 completeQRCodeLogin 一致）
       const effectiveAccountId = result.tokenInfo.user_id || accountId;
 
-      // 如果 effectiveAccountId 与原始 accountId 不同，需要清理旧的临时账号
-      // 否则旧账号会残留在 storage 中，导致 relogin/设备查询用错误的 ID
+      // 顺序很重要：先把新账号配置完整落盘，再注册 client，最后才删旧临时账号。
+      // 旧实现先 deleteAccount(旧ID) 再建新账号，中途任何失败都会留下
+      // 「旧账号已删、新账号没建」的空洞，表现为 account config not found +
+      // no client for account，设备列表只能回退缓存。
+      await this.ensureAccountExists(effectiveAccountId, effectiveAccountId);
+
+      const updates: Record<string, any> = {
+        user_id: result.tokenInfo.user_id,
+        login_method: 'qrcode',
+        services: result.tokenInfo.services,
+        auth_type: 'token',
+      };
+      if (result.passToken) {
+        updates.pass_token = result.passToken;
+      }
+      await this.configManager.updateAccount(effectiveAccountId, updates);
+
+      // 注册 client，并把旧 ID 挂为别名：面板/缓存里残留的旧 ID 请求仍能命中。
+      await this.setupMinaClient(effectiveAccountId, result.tokenInfo);
+      if (effectiveAccountId !== accountId) {
+        this.accountManager.registerAccountAlias(accountId, effectiveAccountId);
+        // 迁移旧账号下已缓存的设备与选中状态，避免设备列表只剩空缓存。
+        try {
+          const legacy = await this.configManager.getAccount(accountId);
+          if (legacy) {
+            const migrated: Record<string, any> = {};
+            if (Array.isArray(legacy.devices) && legacy.devices.length) migrated.devices = legacy.devices;
+            if (legacy.last_selected_device_id) migrated.last_selected_device_id = legacy.last_selected_device_id;
+            if (Object.keys(migrated).length) {
+              await this.configManager.updateAccount(effectiveAccountId, migrated);
+            }
+          }
+        } catch (e: any) {
+          console.log(`[auth] pollQRCode: legacy device migration skipped: ${e?.message || e}`);
+        }
+      }
+
+      // 将实际的 account_id 写入 result，供 handler 返回给前端
+      result.account_id = effectiveAccountId;
+
+      // 冗余持久化与定时器失败不影响已建立的登录状态与配置
+      try {
+        await this.saveTokenInfo(effectiveAccountId, result.tokenInfo);
+        this.startTokenRefresh(effectiveAccountId);
+        console.log(`[auth] pollQRCode: account ready id=${effectiveAccountId} legacy=${accountId}`);
+      } catch (e: any) {
+        console.log(`[auth] pollQRCode: post-processing error (non-critical): ${e.message || e}`);
+      }
+
+      // 最后清理临时账号；别名是运行时映射，不随账号配置删除。
       if (effectiveAccountId !== accountId) {
         try {
           await this.accountManager.deleteAccount(accountId);
@@ -260,34 +308,6 @@ export class AuthService {
         } catch {
           // 旧账号可能不存在（首次登录），忽略
         }
-      }
-
-      await this.ensureAccountExists(effectiveAccountId, effectiveAccountId);
-      await this.setupMinaClient(effectiveAccountId, result.tokenInfo);
-
-      // 将实际的 account_id 写入 result，供 handler 返回给前端
-      result.account_id = effectiveAccountId;
-
-      // 非关键的持久化和定时器操作，失败不影响登录状态
-      try {
-        // 保存登录方式和 passToken（passToken 用于后续 serviceToken 续期，
-        // 不保存会导致 ~12 小时后 serviceToken 过期时无法刷新，账号掉线）
-        const updates: Record<string, any> = {
-          user_id: result.tokenInfo.user_id,
-          login_method: 'qrcode',
-        };
-        if (result.passToken) {
-          updates.pass_token = result.passToken;
-        }
-        await this.configManager.updateAccount(effectiveAccountId, updates);
-
-        // 保存 token 信息
-        await this.saveTokenInfo(effectiveAccountId, result.tokenInfo);
-
-        // 启动 Token 刷新定时器
-        this.startTokenRefresh(effectiveAccountId);
-      } catch (e: any) {
-        console.log(`[auth] pollQRCode: post-processing error (non-critical): ${e.message || e}`);
       }
     }
 
@@ -834,11 +854,14 @@ export class AuthService {
   private async ensureAccountExists(accountId: string, username: string): Promise<void> {
     const existing = await this.configManager.getAccount(accountId);
     if (!existing) {
-      try {
-        await this.accountManager.createAccount(accountId, username, 'password');
-      } catch {
-        // 已存在则忽略
-      }
+      // addAccount 已改为幂等 upsert，重复创建不会再抛「已存在」。
+      await this.accountManager.createAccount(accountId, username, 'password');
+    }
+    // 建完必须校验确实落盘：以前这里把所有异常都吞掉，账号没写进去
+    // 也能继续登录，直到 refreshToken / getClient 才发现配置不存在。
+    const verified = await this.configManager.getAccount(accountId);
+    if (!verified) {
+      throw new Error(`account config persist failed: ${accountId}`);
     }
   }
 }

@@ -122,6 +122,7 @@ export function registerConfigHandlers(
           external_search_no_import: !!config.external_search_no_import,
           search_priority: normalizeSearchPriority(config.search_priority),
           music_api_model_disabled: config.music_api_model_disabled || [],
+          music_api_model_enabled: config.music_api_model_enabled || [],
           music_api_model_defaults: [...DEFAULT_MUSIC_API_MODELS],
           indicator_light_enabled: !!config.indicator_light_enabled,
           interrupt_tts_hint_enabled: !!config.interrupt_tts_hint_enabled,
@@ -367,13 +368,24 @@ export function registerConfigHandlers(
         config.max_song_index = Math.max(1000, Math.min(100000, Number(body.max_song_index) || 10000));
       }
 
-      // 更新 music_api_model_disabled（显式禁用 Music API 的型号清单）
-      if (body.music_api_model_disabled !== undefined) {
-        config.music_api_model_disabled = Array.isArray(body.music_api_model_disabled)
+      // 更新 music_api_model_disabled / music_api_model_enabled
+      // 两个清单互斥：用户显式启用优先于默认清单，显式禁用优先于一切。
+      const normalizeModels = (value: unknown): string[] => Array.isArray(value)
+        ? value
+            .filter((m: any) => typeof m === 'string' && m.trim())
+            .map((m: string) => m.trim().toUpperCase())
+        : [];
+      if (body.music_api_model_disabled !== undefined || body.music_api_model_enabled !== undefined) {
+        const disabled = new Set(normalizeModels(body.music_api_model_disabled !== undefined
           ? body.music_api_model_disabled
-              .filter((m: any) => typeof m === 'string' && m.trim())
-              .map((m: string) => m.trim().toUpperCase())
-          : [];
+          : config.music_api_model_disabled));
+        const enabled = new Set(normalizeModels(body.music_api_model_enabled !== undefined
+          ? body.music_api_model_enabled
+          : config.music_api_model_enabled));
+        // 同一型号不能既显式启用又显式禁用：以「显式禁用」为准。
+        for (const model of disabled) enabled.delete(model);
+        config.music_api_model_disabled = Array.from(disabled);
+        config.music_api_model_enabled = Array.from(enabled);
       }
 
       // 更新 ai_config

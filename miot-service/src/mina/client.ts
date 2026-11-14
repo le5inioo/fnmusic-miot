@@ -25,6 +25,12 @@ import type { DeviceInfoRaw, DeviceListResponse, UbusResponse, NlpResultData, Nl
 const DEFAULT_MUSIC_AUDIO_ID = '1732418460076477549';
 const MUSIC_CP_ID = '355454500';
 
+/** 用户可覆盖的型号播放接口偏好（与 config 的两个清单对应） */
+export interface MusicApiModelPrefs {
+  disabled?: string[];
+  enabled?: string[];
+}
+
 /** player_get_play_status 的 status 值：正在播放 */
 const PLAY_STATUS_PLAYING = 1;
 /** 暂停后回读设备状态的次数（全部仍为 playing 才判定 pause 未生效） */
@@ -171,16 +177,23 @@ export class MinaHTTPClient {
    * @param deviceId - 设备 ID
    * @param url - 音频 URL
    * @param hardware - 设备硬件型号（用于选择播放方法）
-   * @param disabledModels - 用户显式禁用 Music API 的型号列表（优先于默认白名单）
+   * @param modelPrefs - 型号偏好：disabled 显式禁用 Music API、enabled 显式启用。
+   *   兼容旧的 string[] 传参（视为 disabled 清单）。
    * @param lyricsMode - 触屏歌词模式：仅在 Music API 播放路径上启用，
    *   逐首搜云端曲库匹配真实 audioID（搜不到回退 customAudioId），使触屏音箱显示歌词。
    *   参考 xiaomusic：player_play_music 有兼容性风险，非兼容型号仍走 player_play_url。
    */
-  async playByUrl(deviceId: string, url: string, hardware = '', disabledModels?: string[], keepLight = false, customAudioId?: string, lyricsMode?: { enabled: boolean; songName?: string; metadata?: PlayMetadata }, current?: () => boolean): Promise<boolean> {
-    const useMusicAPI = hardware ? needUsePlayMusicAPI(hardware, disabledModels) : false;
+  async playByUrl(deviceId: string, url: string, hardware = '', modelPrefs?: MusicApiModelPrefs | string[], keepLight = false, customAudioId?: string, lyricsMode?: { enabled: boolean; songName?: string; metadata?: PlayMetadata }, current?: () => boolean): Promise<boolean> {
+    const prefs: MusicApiModelPrefs = Array.isArray(modelPrefs)
+      ? { disabled: modelPrefs }
+      : (modelPrefs || {});
+    const useMusicAPI = hardware
+      ? needUsePlayMusicAPI(hardware, prefs.disabled, prefs.enabled)
+      : false;
     if (isDebugLog()) {
-      const disabled = Array.isArray(disabledModels) ? disabledModels.join(',') : '';
-      songloft.log.info(`[MinaClient] playByUrl device=${deviceId} hardware=${hardware} useMusicAPI=${useMusicAPI} keepLight=${keepLight} lyricsMode=${!!lyricsMode?.enabled} disabledModels=[${disabled}] url=${this.redactAccessToken(url).slice(0, 160)}`);
+      const disabled = Array.isArray(prefs.disabled) ? prefs.disabled.join(',') : '';
+      const enabled = Array.isArray(prefs.enabled) ? prefs.enabled.join(',') : '';
+      songloft.log.info(`[MinaClient] playByUrl device=${deviceId} hardware=${hardware} useMusicAPI=${useMusicAPI} keepLight=${keepLight} lyricsMode=${!!lyricsMode?.enabled} disabledModels=[${disabled}] enabledModels=[${enabled}] url=${this.redactAccessToken(url).slice(0, 160)}`);
     }
     if (useMusicAPI) {
       const fallbackAudioId = customAudioId || DEFAULT_MUSIC_AUDIO_ID;

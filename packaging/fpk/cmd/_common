@@ -520,16 +520,36 @@ fnmusic_miot_env_setup() {
     # 运行时 host/gateway.mjs 也会在探测失败时自动发现正确端口。
     local want_base="http://127.0.0.1:${port}" cur_base=""
     cur_base="$(fnmusic_miot_env_get FNMUSIC_BASE_URL)"
-    if [ "${gw_found}" -eq 1 ]; then
+    # 开启「强制 HTTPS」的 NAS：运行时会把 301 目标固化成 https://127.0.0.1:<httpsPort>
+    # 并写回 .env。升级时保留这个结果，不要覆盖回 http，否则每次重装都要重新发现；
+    # FNMUSIC_GATEWAY_PORT 也同步到 HTTPS 端口，供诊断与首启猜测使用。
+    local is_auto=0
+    if [ -z "${cur_base}" ] || fnmusic_miot_is_auto_base "${cur_base}" "${ip}"; then is_auto=1; fi
+    local https_port=""
+    if [ "${is_auto}" -eq 1 ]; then
+        case "${cur_base}" in
+            https://*:*) https_port="${cur_base##*:}" ;;
+        esac
+        case "${https_port}" in
+            ''|*[!0-9]*) https_port="" ;;
+        esac
+    fi
+    if [ -n "${https_port}" ]; then
+        _miot_env_set FNMUSIC_GATEWAY_PORT "${https_port}"
+    elif [ "${gw_found}" -eq 1 ]; then
         _miot_env_set FNMUSIC_GATEWAY_PORT "${port}"
     else
         _miot_env_add FNMUSIC_GATEWAY_PORT "${port}"
     fi
-    if [ -z "${cur_base}" ] || fnmusic_miot_is_auto_base "${cur_base}" "${ip}"; then
-        if [ -n "${cur_base}" ] && [ "${cur_base}" != "${want_base}" ]; then
-            echo "[fnmusic-miot] 网关基址已纠正: ${cur_base} -> ${want_base} (conf=${port})" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+    if [ "${is_auto}" -eq 1 ]; then
+        if [ -n "${https_port}" ]; then
+            echo "[fnmusic-miot] 保留运行时固化的 HTTPS 网关基址: ${cur_base}" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+        else
+            if [ -n "${cur_base}" ] && [ "${cur_base}" != "${want_base}" ]; then
+                echo "[fnmusic-miot] 网关基址已纠正: ${cur_base} -> ${want_base} (conf=${port})" >> "${FNMUSIC_MIOT_LOG}" 2>&1
+            fi
+            _miot_env_set FNMUSIC_BASE_URL "${want_base}"
         fi
-        _miot_env_set FNMUSIC_BASE_URL "${want_base}"
     else
         echo "[fnmusic-miot] 保留用户自定义网关基址: ${cur_base}" >> "${FNMUSIC_MIOT_LOG}" 2>&1
     fi

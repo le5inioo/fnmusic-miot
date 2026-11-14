@@ -21,13 +21,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import ipaddress
 import json
 import os
 import random
 import sqlite3
+import ssl
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 AUTHX_PREFIX = "NDzZTVxnRKP8Z0jXg1VAMonaG8akvh"
@@ -49,6 +52,33 @@ def sign_authx(pathname: str) -> str:
     return "nonce=%s&timestamp=%s&sign=%s" % (nonce, timestamp, digest)
 
 
+def is_local_gateway_host(host: str) -> bool:
+    """Only local/private gateway hosts may skip TLS verification."""
+    h = (host or "").strip("[]").lower()
+    if h == "localhost" or h == "::1" or h.startswith("127.") or h.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(h)
+        return bool(ip.is_loopback or ip.is_private or ip.is_link_local)
+    except ValueError:
+        return False
+
+
+def probe_ssl_context(base: str):
+    """fnOS force-HTTPS redirects an HTTP request to a self-signed HTTPS port
+    (whose cert usually does not match 127.0.0.1). urllib follows the 301, so
+    the relaxed context must be installed on the initial request as well --
+    ``context`` is harmless for plain HTTP and applies to the redirected HTTPS
+    connection. Only local/private gateway hosts get this treatment."""
+    parsed = urllib.parse.urlparse(base)
+    if not is_local_gateway_host(parsed.hostname or ""):
+        return None
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
 def probe(base: str, token: str, timeout: float) -> bool:
     url = base.rstrip("/") + "/music/api/v1" + PROBE_PATH
     req = urllib.request.Request(url, headers={
@@ -57,8 +87,21 @@ def probe(base: str, token: str, timeout: float) -> bool:
         "Accept": "application/json",
         "authx": sign_authx(PROBE_PATH),
     })
+    # build_opener 让重定向后的 HTTPS 连接也使用同一个放宽的 context；
+    # urlopen(context=...) 在部分 Python 版本上只作用于首次请求。
+    handlers = []
+    parsed = urllib.parse.urlparse(base)
+    local = is_local_gateway_host(parsed.hostname or "")
+    # 回环 / 内网网关一律直连：环境里的 HTTP_PROXY 会把 127.0.0.1 的请求
+    # 发到代理上导致超时，而网关根本不需要代理。公网自定义基址仍可用代理。
+    if local:
+        handlers.append(urllib.request.ProxyHandler({}))
+    ctx = probe_ssl_context(base)
+    if ctx is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=ctx))
+    opener = urllib.request.build_opener(*handlers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with opener.open(req, timeout=timeout) as resp:
             payload = json.loads(resp.read().decode("utf-8", "replace"))
             return payload.get("code") == 0
     except (urllib.error.URLError, OSError, ValueError, TimeoutError) as exc:

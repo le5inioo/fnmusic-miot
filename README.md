@@ -73,6 +73,42 @@ npm run build:all
 
 ## 更新记录
 
+### 2.3.5（2026-11-14 本地构建 + 部署 NAS，**尚未发布 GitHub**）
+
+> **累积版本**：本版把「2.3.4 后续修复」（OH1P 兼容、扫码账号落盘）与下面新的
+> 「强制 HTTPS 通用兼容」一起承接，正式发布时不再出现同号不同内容。
+
+- **修复「飞牛 NAS 开启强制 HTTPS 连接后 miot 加载不了曲库」**（用户反馈）：
+  - **根因**：fnOS ≥ 0.8.22 默认 HTTP 5666 / HTTPS 5667，开启「强制 HTTPS 连接」后把 HTTP 请求 301 到独立的 HTTPS 端口，而该端口默认使用自签证书。控制层原先全链路假设 `http://`：`apiCall` / `login` / `openStream` / 封面请求用 `redirect:'manual'`，拿到 301 后按 JSON 解析直接失败；`normalizeBaseUrl` / 网关发现用 `redirect:'follow'`，跟到 HTTPS 后 Node fetch 抛 `DEPTH_ZERO_SELF_SIGNED_CERT`，**2.3.4 的通用网关发现也救不了（它只解决端口，没解决协议）**。即使用户上传了正式证书，用 `127.0.0.1` 访问仍会 CN/SAN 不匹配。
+  - **修复（不写死任何端口 / 域名）**：新增 `host/gateway-fetch.mjs` 作为网关专用请求层 ——
+    - 仅当目标是**内网网关的 HTTPS**时用 `node:https` 并定向放宽证书校验；HTTP 与公网 HTTPS 一律走原生 fetch 严格校验，**不设置 `NODE_TLS_REJECT_UNAUTHORIZED=0`**（同一进程还要连小米云）。
+    - 自动吸收「网关自身」的 301（协议/端口升级），保留全部 headers 重发，把最终 origin 回调固化为 `urlBase` 并写回 `.env`；跳转目标不是 `/music/api/v1` 时不自动跟随，在线音源的 CDN 302 仍由 `openStream` 自己处理。
+    - `host/gateway.mjs` 的 `confPorts()` 结构化返回 `http` / `https` 端口与 `force_https` 标志，`probeBase()` 双协议探测、优先试 conf 里的 HTTPS 端口。
+    - `scripts/fnmusic_token.py` 同步支持：内网网关直连（忽略环境 `HTTP_PROXY`，否则回环请求会被发到代理而超时）、重定向后的自签 HTTPS 放宽校验。
+    - 安装脚本升级时保留已固化的 `https://` 基址，不覆盖回 `http`。
+  - **诊断导出**新增「证书策略 / 强制 HTTPS 标志 / HTTPS 端口」，一眼可判定当前走的是 `http (no TLS)`、`https-local (self-signed allowed)` 还是 `https-remote (strict verification)`。
+  - **用户侧无需操作**：升级后首次请求自动跟随 301、切换并持久化正确基址；音箱回访地址是 miot 自己的控制层端口，不受飞牛强制 HTTPS 影响。
+- **顺手修复**：fnOS 覆盖安装实际是 uninstall → install（走 `install_callback`），之前每次普通升级都会误写「首次端口设置引导」。`install_callback` 现在按 `MIOT_DATA_ROOT/VERSION` 区分真·首次安装与老版本升级，2.3.4 → 2.3.5 不再重复弹引导。
+- **验收**：`_miot_check/test_force_https.mjs` 本地 10 项 ALL PASS（普通 HTTP 零影响 / 301 吸收 / 自签证书 / CDN 302 不误跟随 / 内网判定 / 301 目标保持内网 host / conf 解析 / 网关发现命中 https / `createFnMusicClient` 固化基址 / python token 链路）；该自检在 NAS 上以已安装的 repo 模块复跑同样 ALL PASS。`verify_235.sh` 全绿：`VERSION=2.3.5`、token 不变、8774/8775/8776 全 200、351 首 /16 歌单 `loaded=16 failed=0`、现网零扫描、诊断 `证书策略: http (no TLS)`。
+- 产物：`fnmusic-miot-2.3.5.fpk` 963,336 B / `481938d1…5f8fcbb42`，源码包 954,399 B / `b706b165…8d8a9951`；本地 = NAS = `.sha256` 三处一致，备份 `pre-2.3.5-20261114-222203`。
+- **发布状态**：按用户规则，本轮**未** commit / push / tag / 建 Release；GitHub latest 仍是 `v2.3.4`，需单独授权后再发布。
+
+### 2.3.4 后续修复（2026-11-14 本地构建，**已由 2.3.5 承接**）
+
+> **版本说明**：本段为历史记录 —— 改动发生在 v2.3.4 正式发布之后，当时产物仍标 `2.3.4`、
+> GitHub Release v2.3.4 不含下列修复；现已统一由 **2.3.5** 承接并重新打包。
+
+- **新型号音箱（含 OH1P / Xiaomi Sound 2 Pro）的播放兼容，做成通用能力**：
+  - 起因：用户设备 `OH1P`（`xiaomi.wifispeaker.oh1p`，米家 ID 26845，2026-01 新品）。控制层的 TTS 命令表认识它，但它不在 `DEFAULT_MUSIC_API_MODELS` 里，默认走 `player_play_url` 直链；同代 Pro 系列（OH2 / OH2P）必须走 `player_play_music` 才能正常发声，否则「日志显示 Playing 但音箱无声」。
+  - 默认表补入 `OH1P`、`OH1M`、`OH8`、`OH27`（OH 系列同代、TTS command 同为 `7-3`），共 24 个型号。
+  - **通用解**：新增 `music_api_model_enabled` 用户配置，`needUsePlayMusicAPI()` 优先级改为「显式禁用 > 显式启用 > 内置默认 > 直链」，型号统一大写/去空格比较。面板「设置 → 设备 → 高级设备兼容」的型号勾选框**不再禁用**，任意已识别型号（包括以后发布的新型号）都能手动切换，无需等插件发版；徽标区分「默认 / 手动开启 / 手动关闭」。两个清单在后端做互斥归一化。
+  - 播放链路 `playByUrl()` 的参数改为 `MusicApiModelPrefs { disabled, enabled }`（兼容旧的 `string[]` 传参），debug 日志同时打印两个清单。
+- **修复扫码登录后账号配置丢失 / 账号 ID 错配**（来自 `fnmusic-miot-diag-20261114-155421.log`）：
+  - 现象：登录成功但 `refreshToken: account config not found`、`No client for account, returning cached devices: 15623065800`、`getPlayerStatus: no client for account: 6306495`，设备列表只能回退缓存、状态查不到。
+  - 根因：账号表用「共享可变数组 → 读改写 → 整表写回」，扫码登录、设备刷新、token 刷新并发时后写覆盖先写（lost update）；且 `updateAccount()` 在账号不存在时直接抛错，而 `ensureAccountExists()` 把所有异常静默吞掉；扫码流程又是「先删旧临时账号 → 再建新 userId 账号」，中途失败就留下「旧已删、新未建」的空洞。
+  - 修复：`ConfigManager` 新增 `withAccounts()` 串行写队列，所有账号写入从最新缓存取副本、改完立即写回；`addAccount()` 幂等、`updateAccount()` 改为 **upsert**（账号不存在自动补建，不再丢 token）；`pollQRCode()` 调整顺序为「先完整落盘新账号 → 注册 client → 迁移旧账号设备与别名 → 最后删临时账号」；`AccountManager` 新增账号 ID 别名与 `user_id` 反查，残留的旧 ID 请求仍命中同一个 client；`ensureAccountExists()` 建完校验落盘，不再静默吞错。
+- **验收**：`_miot_check/test_model_and_account.mjs` 离线自检 23 项 ALL PASS（型号判定 12 项 + 账号并发持久化 11 项）；`verify_234.sh` 新增 `[M]` 段核对 NAS 上的 bundle / 面板 / `/config` 字段，全绿；现网 `defaults 含 OH1P = True`、`defaults 数量 = 24`。
+
 ### 2.3.4
 
 - **修复「飞牛网关端口不是 6688 就连不上」：通用网关自动发现**（来自两份 2.3.2 用户 debug 日志与 5666/51666 用户的反馈）。

@@ -64,7 +64,9 @@ export const GET_ASK_BY_MINA: string[] = ['M01'];
 /**
  * 默认走 PlayByMusicURL（player_play_music）接口的设备型号。
  * 用户可在配置中把某个型号加入 music_api_model_disabled 让它改走 player_play_url，
- * 覆盖此默认（部分型号 ROM 更新后其实两种接口都能播，Music API 反而更脆弱）。
+ * 或加入 music_api_model_enabled 让不在默认清单里的新型号也走 Music API。
+ * 后者是通用兼容入口：小米每年都会发布新型号（例如 2026 年的 OH1P /
+ * Xiaomi Sound 2 Pro），不必等插件发版，用户自己就能勾选试出来。
  */
 export const DEFAULT_MUSIC_API_MODELS: readonly string[] = [
   'X08C',
@@ -76,6 +78,12 @@ export const DEFAULT_MUSIC_API_MODELS: readonly string[] = [
   'OH11',
   'OH2',
   'OH2P',
+  // OH 系列同代 Sound / Sound Pro：TTS command 均为 "7-3"，与已在表内的
+  // OH11 / OH2P 属同一播放链路。OH1P = xiaomi.wifispeaker.oh1p (米家 ID 26845)。
+  'OH1P',
+  'OH1M',
+  'OH8',
+  'OH27',
   'X6A',
   'LX04',
   'L05B',
@@ -107,11 +115,26 @@ export function shouldUseMinaForAsk(hardware: string): boolean {
 
 /**
  * 判断指定硬件型号是否需要使用 player_play_music API
- * @param disabledModels - 用户显式禁用 Music API 的型号列表（优先于默认白名单）
+ *
+ * 优先级：用户显式禁用 > 用户显式启用 > 内置默认清单 > 直链播放。
+ * 型号统一按大写比较，允许配置里写小写或带空格。
+ *
+ * @param disabledModels - 用户显式禁用 Music API 的型号列表（最高优先级）
+ * @param enabledModels - 用户显式启用 Music API 的型号列表（可覆盖默认清单之外的型号）
  */
-export function needUsePlayMusicAPI(hardware: string, disabledModels?: string[]): boolean {
-  if (disabledModels && disabledModels.includes(hardware)) return false;
-  return DEFAULT_MUSIC_API_MODELS.includes(hardware);
+export function needUsePlayMusicAPI(
+  hardware: string,
+  disabledModels?: string[],
+  enabledModels?: string[],
+): boolean {
+  const hw = String(hardware || '').trim().toUpperCase();
+  if (!hw) return false;
+  const normalize = (list?: string[]): string[] => Array.isArray(list)
+    ? list.map((m) => String(m || '').trim().toUpperCase()).filter(Boolean)
+    : [];
+  if (normalize(disabledModels).includes(hw)) return false;
+  if (normalize(enabledModels).includes(hw)) return true;
+  return DEFAULT_MUSIC_API_MODELS.includes(hw);
 }
 
 /**

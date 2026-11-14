@@ -50,6 +50,7 @@ const defaultConfig: MiotConfig = {
   external_search_no_import: false,
   search_priority: 'parallel',
   music_api_model_disabled: [],
+  music_api_model_enabled: [],
   music_api_model_defaults: [],
   indicator_light_enabled: false,
   interrupt_tts_hint_enabled: false,
@@ -288,6 +289,7 @@ export async function loadConfig(): Promise<void> {
     suggested_addresses: Array.isArray(config?.suggested_addresses) ? config.suggested_addresses : [],
     external_search_sources: Array.isArray(config?.external_search_sources) ? config.external_search_sources : [],
     music_api_model_disabled: Array.isArray(config?.music_api_model_disabled) ? config.music_api_model_disabled : [],
+    music_api_model_enabled: Array.isArray(config?.music_api_model_enabled) ? config.music_api_model_enabled : [],
     music_api_model_defaults: Array.isArray(config?.music_api_model_defaults) ? config.music_api_model_defaults : [],
     ai_config: config?.ai_config && typeof config.ai_config === 'object' ? { ...config.ai_config } : {},
   };

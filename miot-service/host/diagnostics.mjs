@@ -158,6 +158,7 @@ export function createDiagnostics({ cfg, storage, log, gateway = null }) {
     if (gateway) {
       const s = gateway.snapshot();
       out.push(`运行时网关基址: ${s.runtime}`);
+      out.push(`证书策略: ${s.tlsPolicy}；强制 HTTPS=${s.forceHttps ? '是' : '否'}；HTTPS 端口=[${(s.confHttpsPorts || []).join(', ') || '无'}]`);
       out.push(`网关配置: ${s.confPath} 可读=${s.confReadable} 解析到端口=[${s.confPorts.join(', ') || '无'}]`);
       out.push(`本机 LISTEN 端口数: ${s.listenPortCount}；本机 LAN IPv4: [${s.lanIps.join(', ') || '无'}]`);
       out.push(`发现时排除的本应用端口: [${s.selfPorts.join(', ') || '无'}]`);

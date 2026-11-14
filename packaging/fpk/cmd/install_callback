@@ -39,7 +39,15 @@ fi
 echo "[fnmusic-miot] 安装完成 node=${NODE_BIN} unit=${MIOT_UNIT_NAME}" >> "${FNMUSIC_MIOT_LOG}"
 
 # 首次安装引导：面板首次打开直接跳到「设置 → 服务端口」，让用户确认/填写端口。
-fnmusic_miot_write_port_guide_pending "fresh-install" ""
+# fnOS 的 appcenter 覆盖安装实际是 uninstall → install，仍会走 install_callback；
+# 若不判断旧版本，每次普通升级都会被当成全新安装、反复弹引导。
+# MIOT_DATA_ROOT/VERSION 在卸载时不会被清理，可据此区分首次安装与老版本升级。
+prev_ver="$(cat "${MIOT_DATA_ROOT}/VERSION" 2>/dev/null | tr -d '[:space:]')"
+if [ -z "${prev_ver}" ]; then
+    fnmusic_miot_write_port_guide_pending "fresh-install" ""
+elif fnmusic_miot_version_lt "${prev_ver}" "${MIOT_PORT_GUIDE_SINCE}"; then
+    fnmusic_miot_write_port_guide_pending "upgrade" "${prev_ver}"
+fi
 fnmusic_miot_record_version
 
 exit 0

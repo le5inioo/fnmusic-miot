@@ -129,6 +129,54 @@ conf 解析端口、LISTEN 端口数与最近一次自动发现结果；配置�
 面板对外地址：`https://<NAS>/app/fnmusic-ext/miot/index.html`。
 WebUI 的 `/miot/{path:path}` 反代会剥掉前缀、注入 `Authorization`，转到 `127.0.0.1:8006`。
 
+## 设备型号与播放接口（Music API）
+
+`src/mina/constants.ts` 的 `needUsePlayMusicAPI(hardware, disabled, enabled)` 决定下发歌曲时走
+`player_play_music` 还是 `player_play_url`。优先级：**显式禁用 > 显式启用 > 内置默认表 > 直链**，
+型号统一按大写、去空格比较。
+
+| 来源 | 配置 / 常量 | 说明 |
+| --- | --- | --- |
+| 内置默认表 | `DEFAULT_MUSIC_API_MODELS`（24 个） | OH 系列含 `OH11` / `OH2` / `OH2P` / `OH1P` / `OH1M` / `OH8` / `OH27` |
+| 用户显式启用 | `music_api_model_enabled` | 让默认表之外的新型号也走 Music API |
+| 用户显式禁用 | `music_api_model_disabled` | 覆盖默认表，退回直链 |
+
+部分 Pro / Sound 系列固件只认 `player_play_music`，走直链会「日志显示 Playing 但音箱无声」；
+另一些型号在 ROM 更新后 Music API 反而更脆弱，需要关掉。因此**两条手动覆盖清单同时存在**，
+面板「设置 → 设备 → 高级设备兼容」对**所有已识别型号**都提供勾选框（早期版本对不在默认表的型号
+直接 `:disabled`，用户无法自救），以后小米发布新型号无需等插件发版即可自行试出来。
+`POST /config` 对两个清单做互斥归一化（同时出现时以显式禁用为准）。
+
+链路：`service/service.ts::playURL` 读配置 → `mina/client.ts::playByUrl(modelPrefs)` →
+`needUsePlayMusicAPI`。`MusicApiModelPrefs { disabled, enabled }` 兼容旧的 `string[]` 传参（视为 disabled）。
+debug 日志 `[MinaClient] playByUrl` 会打印 `hardware` / `useMusicAPI` / 两个清单，便于定位无声问题。
+
+## 飞牛网关协议 / 强制 HTTPS（2.3.5）
+
+控制层所有对飞牛音乐网关的请求（`apiCall` / `login` / `openStream` / 封面 / token 脚本）
+统一走 `host/gateway-fetch.mjs`，不再各自直接调 `nativeFetch`。
+
+| 场景 | 行为 |
+| --- | --- |
+| `http://` 网关 | 原生 fetch，行为与旧版一致，零额外开销 |
+| 内网 `https://` 网关（回环 / 私有 IPv4 / `*.local`） | `node:https` + `rejectUnauthorized:false`，容忍自签证书与 `127.0.0.1` 域名不匹配 |
+| 公网 `https://` | 原生 fetch 严格校验，**不**放宽 |
+| 网关自身的 301（强制 HTTPS） | 自动吸收，保留 headers 重发，并把最终 origin 回调固化为 `urlBase` + 写回 `.env` |
+| 在线音源 CDN 302 | Location 不是 `/music/api/v1`，不自动跟随，交回 `openStream` 手动 hop |
+
+设计要点：
+
+- 绝不设 `NODE_TLS_REJECT_UNAUTHORIZED=0` —— 同一进程还要连小米云，全局放宽会把公网请求的证书校验一起关掉。放宽范围严格限定在 `isLocalGatewayHost()` 判定的内网网关。
+- `resolveRedirectBase()` 在当前基址是内网直连、而 301 的 Location 写成域名时，**保留当前 host、只采纳协议与端口**，避免 DNS 不可达 / 证书域名不匹配；用户手填的域名 / 反向代理基址则完整采纳 Location。
+- `host/gateway.mjs` 的 `confPorts()` 读 `{"schema":{"http":{"port":…},"https":{"port":…}},"force_https":…}`；`probeBase()` 对同一端口先试 http 再试 https，因此「HTTP 端口仍在但 301」「HTTP 端口被完全关闭只留 HTTPS」两种实现都能命中。
+- `scripts/fnmusic_token.py` 对内网网关用 `ProxyHandler({})` 强制直连（环境里的 `HTTP_PROXY` 会把 `127.0.0.1` 请求发到代理导致超时），并用同一个放宽的 SSL context 覆盖重定向后的 HTTPS 连接。
+- 音箱回访地址 `MIOT_SERVER_HOST` 指向 miot 自己的控制层端口，不经飞牛 nginx，**不受强制 HTTPS 影响**。
+
+排查时导出诊断日志，看「环境 / 网关发现」段的 `证书策略` 与 `强制 HTTPS`：
+`http (no TLS)` = 普通 HTTP；`https-local (self-signed allowed)` = 已切到内网 HTTPS；
+`https-remote (strict verification)` = 公网/自定义域名严格校验。离线自检脚本
+`_miot_check/test_force_https.mjs` 可用 `MIOT_SVC_DIR=<已安装 repo>/miot-service` 在 NAS 上直接复跑。
+
 ## 已知边界
 
 - `songs.create` / `download` 禁用：不往飞牛官方曲库写文件。

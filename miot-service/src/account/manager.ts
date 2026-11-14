@@ -17,6 +17,8 @@ export class AccountManager {
   private configManager: ConfigManager;
   /** accountId → MinaHTTPClient 实例（运行时，不持久化） */
   private minaClients: Map<string, any>;
+  /** 旧账号 ID（扫码临时 ID / 手机号）→ 真实 userId，兼容登录切换后残留的请求 */
+  private accountAliases: Map<string, string> = new Map();
 
   constructor(configManager: ConfigManager) {
     this.configManager = configManager;
@@ -125,14 +127,51 @@ export class AccountManager {
 
   // ===== Mina客户端管理（运行时） =====
 
-  /** 获取账号的MinaHTTPClient实例 */
-  getMinaClient(accountId: string): any | null {
-    return this.minaClients.get(accountId) ?? null;
+  /**
+   * 注册账号 ID 别名。扫码登录会把临时 ID / 手机号换成真实 userId，
+   * 面板与设备缓存里仍可能拿着旧 ID 请求设备列表或播放状态；别名让这些
+   * 请求继续命中同一个 client，而不是回退到「无 client + 缓存设备」。
+   */
+  registerAccountAlias(alias: string, targetId: string): void {
+    if (!alias || !targetId || alias === targetId) return;
+    this.accountAliases.set(alias, targetId);
+    const client = this.minaClients.get(targetId);
+    if (client) this.minaClients.set(alias, client);
   }
 
-  /** 设置账号的MinaHTTPClient实例 */
+  /** 解析别名链，返回真实账号 ID */
+  resolveAccountId(accountId: string): string {
+    const seen = new Set<string>();
+    let current = accountId;
+    while (this.accountAliases.has(current) && !seen.has(current)) {
+      seen.add(current);
+      current = this.accountAliases.get(current) as string;
+    }
+    return current;
+  }
+
+  /** 获取账号的MinaHTTPClient实例（支持旧 ID 别名与 userId 反查） */
+  getMinaClient(accountId: string): any | null {
+    const direct = this.minaClients.get(accountId);
+    if (direct) return direct;
+    const resolved = this.resolveAccountId(accountId);
+    if (resolved !== accountId) return this.minaClients.get(resolved) ?? null;
+    // 扫码登录后前端可能直接拿 userId 当 accountId，而 client 挂在旧 ID 上。
+    for (const [id, client] of this.minaClients) {
+      if (id === resolved) return client;
+      try {
+        if (client?.getTokenInfo?.()?.user_id === accountId) return client;
+      } catch { /* 非标准 client，忽略 */ }
+    }
+    return null;
+  }
+
+  /** 设置账号的MinaHTTPClient实例（同步到所有指向它的别名） */
   setMinaClient(accountId: string, client: any): void {
     this.minaClients.set(accountId, client);
+    for (const [alias, target] of this.accountAliases) {
+      if (target === accountId) this.minaClients.set(alias, client);
+    }
   }
 
   /** 移除账号的MinaHTTPClient实例 */

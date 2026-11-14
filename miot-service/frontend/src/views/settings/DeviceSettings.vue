@@ -168,18 +168,28 @@ const defaultsMissingFromDevices = computed(() => {
 function isMusicApiEnabled(hardware: string): boolean {
   const disabled = state.config.music_api_model_disabled || [];
   if (disabled.includes(hardware)) return false;
+  if ((state.config.music_api_model_enabled || []).includes(hardware)) return true;
   return (state.config.music_api_model_defaults || []).includes(hardware);
 }
 async function toggleMusicApi(hardware: string, enabled: boolean): Promise<void> {
   const defaults = state.config.music_api_model_defaults || [];
-  const current = new Set(state.config.music_api_model_disabled || []);
+  const disabled = new Set(state.config.music_api_model_disabled || []);
+  const enabledModels = new Set(state.config.music_api_model_enabled || []);
   if (enabled) {
-    current.delete(hardware);
-  } else if (defaults.includes(hardware)) {
-    // 默认启用的型号才需要显式禁用；不在默认里的型号本就不走 Music API，不用记录。
-    current.add(hardware);
+    disabled.delete(hardware);
+    // 默认已启用的型号无需记录；不在默认清单里的新型号靠显式启用清单生效。
+    if (defaults.includes(hardware)) enabledModels.delete(hardware);
+    else enabledModels.add(hardware);
+  } else {
+    enabledModels.delete(hardware);
+    // 默认启用的型号要显式禁用；非默认型号本就不走 Music API，清空记录即可。
+    if (defaults.includes(hardware)) disabled.add(hardware);
+    else disabled.delete(hardware);
   }
-  await saveConfig({ music_api_model_disabled: Array.from(current) });
+  await saveConfig({
+    music_api_model_disabled: Array.from(disabled),
+    music_api_model_enabled: Array.from(enabledModels),
+  });
 }
 </script>
 
@@ -212,18 +222,20 @@ async function toggleMusicApi(hardware: string, enabled: boolean): Promise<void>
   <SlDisclosure title="高级设备兼容" icon="speaker" description="按设备型号调整 Music API 与指示灯行为。">
     <div class="form-body">
       <label class="field-label">按型号选择 Music API 播放</label>
-      <p class="field-help">勾选使用 Music API，取消勾选使用直链播放。部分型号需要 Music API 才能正常发声，兼容性取决于设备固件。</p>
-      <p class="field-help">遇到歌尾复播或切歌异常时，可尝试取消勾选；若取消后无声，请重新勾选。</p>
+      <p class="field-help">勾选使用 Music API，取消勾选使用直链播放。部分型号（含 Xiaomi Sound 2 Pro / OH1P）需要 Music API 才能正常发声，兼容性取决于设备固件。</p>
+      <p class="field-help">所有已识别型号均可切换，包括不在默认清单里的新型号，无需等待插件更新；遇到歌尾复播或切歌异常可取消勾选，若取消后无声请重新勾选。</p>
       <p class="field-help">保存后，下次下发歌曲时生效，当前播放不会立即切换；同一型号的所有设备共用此设置。</p>
       <p v-if="!musicApiModelRows.length" class="field-help">尚未识别到任何设备型号，登录并开启设备管理后会出现在这里。</p>
       <div v-for="row in musicApiModelRows" :key="row.hardware" class="device-check-row">
-        <SlCheckbox :model-value="isMusicApiEnabled(row.hardware)" :disabled="!row.inDefaults" :aria-label="`使用 Music API 播放 ${row.hardware}`" @update:model-value="toggleMusicApi(row.hardware, $event)" />
+        <SlCheckbox :model-value="isMusicApiEnabled(row.hardware)" :aria-label="`使用 Music API 播放 ${row.hardware}`" @update:model-value="toggleMusicApi(row.hardware, $event)" />
         <div class="device-check-copy">
           <strong>{{ row.hardware }}</strong>
           <small>{{ row.deviceName }}</small>
           <small>当前设置：{{ isMusicApiEnabled(row.hardware) ? 'Music API' : '直链播放' }}</small>
         </div>
-        <span v-if="row.inDefaults" class="chip chip-success">默认</span>
+        <span v-if="row.inDefaults && isMusicApiEnabled(row.hardware)" class="chip chip-success">默认</span>
+        <span v-else-if="isMusicApiEnabled(row.hardware)" class="chip chip-success">手动开启</span>
+        <span v-else-if="row.inDefaults" class="chip chip-warning">手动关闭</span>
       </div>
       <p v-if="defaultsMissingFromDevices.length" class="field-help">
         默认清单中未在当前账号出现的型号：

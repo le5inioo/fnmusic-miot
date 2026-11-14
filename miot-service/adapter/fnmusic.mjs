@@ -7,7 +7,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import http from 'node:http';
-import { nativeFetch } from '../host/fetch.mjs';
+import { gatewayFetch } from '../host/gateway-fetch.mjs';
 
 export const AUTHX_PREFIX = 'NDzZTVxnRKP8Z0jXg1VAMonaG8akvh';
 export const AUTHX_KEY = '6D5602D4-A342-4799-A0F0-BB795E7167D0';
@@ -134,6 +134,27 @@ export function createFnMusicClient({
   let lastNormAttempt = 0;
   const deviceId = randomBytes(16).toString('hex');
 
+  // 网关请求统一走 gatewayFetch：内网 HTTPS 自签证书定向放行，并自动吸收
+  // 「强制 HTTPS」的 301。命中升级时立刻把最终 origin 固化为 urlBase，
+  // 同时通知宿主写回 .env，后续请求不再经过一次跳转。
+  // 公网请求（含小米云）仍走严格证书校验，不受影响。
+  const gatewayOpts = {
+    onUpgrade: async (origin) => {
+      if (!origin || origin === urlBase) return;
+      const previous = urlBase;
+      urlBase = origin;
+      let port = null;
+      try { port = Number(new URL(origin).port) || null; } catch { /* 无端口 */ }
+      log.info?.(`[fnmusic] gateway base upgraded ${previous} -> ${origin} (force-https redirect)`);
+      try {
+        await onGatewayResolved?.({ ok: true, baseUrl: origin, port, source: 'https-redirect' });
+      } catch (err) {
+        log.warn?.(`[fnmusic] persist upgraded base failed: ${err.message}`);
+      }
+    },
+  };
+  const gwFetch = (url, init) => gatewayFetch(url, init, gatewayOpts);
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   // 网络层瞬时失败（fetch failed / ECONNREFUSED / ENETUNREACH…）退避重试。
@@ -191,22 +212,27 @@ export function createFnMusicClient({
       const isLoopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
       if (!isLoopback && u.port) {
         const loopback = `${u.protocol}//127.0.0.1:${u.port}`;
-        await fetchRetry(
-          () => nativeFetch(loopback + API_BASE + '/initialization/state', { redirect: 'follow' }),
+        const probe = await fetchRetry(
+          () => gwFetch(loopback + API_BASE + '/initialization/state'),
           { attempts: 2 },
         );
-        log.info?.(`[fnmusic] prefer loopback ${urlBase} -> ${loopback}`);
-        urlBase = loopback;
+        // 若回环探测本身就撞上强制 HTTPS 的 301，采纳最终 origin，
+        // 不要再把基址写回 http 让后续请求重复跳转。
+        const settled = probe.gatewayBase || loopback;
+        log.info?.(`[fnmusic] prefer loopback ${urlBase} -> ${settled}`);
+        urlBase = settled;
       }
     } catch (err) {
       log.warn?.(`[fnmusic] loopback probe failed, keep ${urlBase}: ${err.message}`);
     }
     try {
       const r = await fetchRetry(
-        () => nativeFetch(urlBase + API_BASE + '/initialization/state', { redirect: 'follow' }),
+        () => gwFetch(urlBase + API_BASE + '/initialization/state'),
       );
-      const final = new URL(r.url);
-      const origin = final.origin;
+      // gatewayFetch 已吸收网关 301 并通过 onUpgrade 固化 urlBase；这里保留
+      // 兜底，兼容其它来源的最终地址变化。
+      let origin = r.gatewayBase;
+      if (!origin) { try { origin = new URL(r.url).origin; } catch { origin = null; } }
       if (origin && origin !== urlBase) {
         log.warn?.(`[fnmusic] redirect ${urlBase} -> ${origin}`);
         urlBase = origin;
@@ -269,7 +295,7 @@ export function createFnMusicClient({
     for (const mode of [useAuthx, !useAuthx]) {
       const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
       if (mode) headers.authx = signAuthx('POST', path, null, Buffer.from(body));
-      const r = await fetchRetry(() => nativeFetch(urlBase + API_BASE + path, { method: 'POST', headers, body, redirect: 'manual' }), { attempts: 2 });
+      const r = await fetchRetry(() => gwFetch(urlBase + API_BASE + path, { method: 'POST', headers, body, redirect: 'manual' }), { attempts: 2 });
       let payload;
       try { payload = await r.json(); } catch { lastError = `HTTP ${r.status}`; continue; }
       if (payload?.code === 0) {
@@ -296,7 +322,7 @@ export function createFnMusicClient({
     const body = jsonBody == null ? '' : JSON.stringify(jsonBody);
     const headers = apiHeaders(method, path, query, Buffer.from(body));
     if (jsonBody != null) headers['Content-Type'] = 'application/json';
-    const r = await fetchRetry(() => nativeFetch(urlBase + API_BASE + path + encodeQuery(query), {
+    const r = await fetchRetry(() => gwFetch(urlBase + API_BASE + path + encodeQuery(query), {
       method, headers, body: body || undefined, redirect: 'manual',
     }));
     if ((r.status === 401 || r.status === 403) && !retried) {
@@ -342,7 +368,7 @@ export function createFnMusicClient({
     };
     for (let hop = 0; hop <= 5; hop++) {
       const r = await fetchRetry(
-        () => nativeFetch(current, { method: 'GET', headers, redirect: 'manual' }),
+        () => gwFetch(current, { method: 'GET', headers, redirect: 'manual' }),
         { attempts: 2 },
       );
       if (r.status >= 300 && r.status < 400) {

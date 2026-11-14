@@ -108,6 +108,8 @@ function defaultPluginConfig(): PluginConfig {
     external_search_timeout: 6,
     external_search_no_import: false,
     search_priority: 'parallel',
+    music_api_model_disabled: [],
+    music_api_model_enabled: [],
     indicator_light_enabled: true,
     default_cover_id: '1732418460076477549',
     touchscreen_lyrics_enabled: false,
@@ -156,11 +158,15 @@ export class ConfigManager {
   // - 写穿透：saveConfig/saveAccounts 写盘后直接把新值塞回缓存，写后读即新值。
   //   所有账号写入（add/update/remove/updateDevice/setLastSelectedDevice）
   //   最终都经 saveAccounts，自动失效。
-  // - 引用约定：getAccounts 返回缓存数组引用。现有调用方模式均为
-  //   「get → 原地改 → saveAccounts 写回」，改的就是要写回的数据，语义正确。
-  //   getConfig 每次返回浅合并的新对象，不暴露缓存引用。
+  // - 账号表的所有写入统一经 withAccounts 串行执行（副本 → 改 → 整表写回），
+  //   避免并发「读-改-写」互相覆盖；外部调用方只读，不再原地改缓存数组。
+  // - getConfig 每次返回浅合并的新对象，不暴露缓存引用。
   private accountsCache: Promise<AccountConfig[]> | null = null;
   private configCache: Promise<Partial<PluginConfig>> | null = null;
+  // 账号表的所有写入必须串行：扫码登录、设备列表刷新、播放进度、token 刷新
+  // 会并发执行「读数组 → 改 → 整表写回」。若各自基于同一份旧快照写回，
+  // 后写的会覆盖先写的，表现为刚登录的账号/凭据凭空消失（getAccount=null）。
+  private accountsWrite: Promise<unknown> = Promise.resolve();
   // 歌单进度表：每次切歌都要读改写，不缓存就是每首歌一次多余的 storage.get。
   // 与上面两个 key 同一套约定（缓存 in-flight Promise + 写穿透）。
   private playlistProgressCache: Promise<PlaylistProgressStore> | null = null;
@@ -295,7 +301,8 @@ export class ConfigManager {
     if (this.accountsCache === null) {
       this.accountsCache = this.load<AccountConfig[]>(STORAGE_KEY_ACCOUNTS, []);
     }
-    return this.accountsCache;
+    const cached = await this.accountsCache;
+    return Array.isArray(cached) ? cached : [];
   }
 
   /** 保存所有账号配置 */
@@ -304,42 +311,76 @@ export class ConfigManager {
     this.accountsCache = Promise.resolve(accounts);
   }
 
+  /**
+   * 串行执行一次账号表变更：每次从最新缓存取副本，改完立即整表写回。
+   * 避免扫码登录 / 设备刷新 / token 刷新并发时互相覆盖（lost update）。
+   */
+  private withAccounts<T>(mutate: (accounts: AccountConfig[]) => T | Promise<T>): Promise<T> {
+    const pending = this.accountsWrite.catch(() => { }).then(async () => {
+      const accounts = (await this.getAccounts()).map((a) => ({ ...a }));
+      const result = await mutate(accounts);
+      await this.saveAccounts(accounts);
+      return result;
+    });
+    this.accountsWrite = pending;
+    return pending;
+  }
+
   /** 按ID获取单个账号配置 */
   async getAccount(accountId: string): Promise<AccountConfig | null> {
     const accounts = await this.getAccounts();
     return accounts.find(a => a.id === accountId) ?? null;
   }
 
-  /** 添加账号配置（追加） */
+  /** 添加账号配置（已存在则合并，幂等；并发重复创建不会互相覆盖） */
   async addAccount(account: AccountConfig): Promise<void> {
-    const accounts = await this.getAccounts();
-    // 检查是否已存在
-    if (accounts.some(a => a.id === account.id)) {
-      throw new Error(`Account already exists: ${account.id}`);
-    }
-    accounts.push(account);
-    await this.saveAccounts(accounts);
+    await this.withAccounts((accounts) => {
+      const idx = accounts.findIndex((a) => a.id === account.id);
+      if (idx === -1) accounts.push(account);
+      else accounts[idx] = { ...accounts[idx], ...account, updated_at: new Date().toISOString() };
+    });
   }
 
-  /** 更新账号配置（按ID匹配并合并字段） */
+  /**
+   * 更新账号配置（按ID匹配并合并字段）。
+   * 账号不存在时自动补建（upsert）：扫码登录、token 刷新可能在账号尚未建立时就写
+   * 凭据，此时抛错会让整条链路静默失败，账号配置永远落不了盘。
+   */
   async updateAccount(accountId: string, updates: Partial<AccountConfig>): Promise<void> {
-    const accounts = await this.getAccounts();
-    const idx = accounts.findIndex(a => a.id === accountId);
-    if (idx === -1) {
-      throw new Error(`Account not found: ${accountId}`);
-    }
-    accounts[idx] = { ...accounts[idx], ...updates, updated_at: new Date().toISOString() };
-    await this.saveAccounts(accounts);
+    await this.withAccounts((accounts) => {
+      const now = new Date().toISOString();
+      const idx = accounts.findIndex((a) => a.id === accountId);
+      if (idx === -1) {
+        const base: AccountConfig = {
+          id: accountId,
+          account: accountId,
+          auth_type: 'token',
+          login_method: '',
+          password: '',
+          pass_token: '',
+          user_id: '',
+          services: {},
+          devices: [],
+          last_selected_device_id: '',
+          created_at: now,
+          updated_at: now,
+        };
+        accounts.push({ ...base, ...updates, id: accountId, updated_at: now });
+        return;
+      }
+      accounts[idx] = { ...accounts[idx], ...updates, id: accountId, updated_at: now };
+    });
   }
 
   /** 删除账号配置 */
   async removeAccount(accountId: string): Promise<void> {
-    const accounts = await this.getAccounts();
-    const filtered = accounts.filter(a => a.id !== accountId);
-    if (filtered.length === accounts.length) {
-      throw new Error(`Account not found: ${accountId}`);
-    }
-    await this.saveAccounts(filtered);
+    const removed = await this.withAccounts((accounts) => {
+      const idx = accounts.findIndex((a) => a.id === accountId);
+      if (idx === -1) return false;
+      accounts.splice(idx, 1);
+      return true;
+    });
+    if (!removed) throw new Error(`Account not found: ${accountId}`);
     // 账号下所有设备的歌单进度一起清掉，否则账号删了进度还在表里占位到永远
     await this.removePlaylistProgressByAccount(accountId);
   }
@@ -354,18 +395,20 @@ export class ConfigManager {
 
   /** 更新某账号下特定设备的配置 */
   async updateDevice(accountId: string, deviceId: string, updates: Partial<DeviceConfig>): Promise<void> {
-    const accounts = await this.getAccounts();
-    const accIdx = accounts.findIndex(a => a.id === accountId);
-    if (accIdx === -1) {
-      throw new Error(`Account not found: ${accountId}`);
-    }
-    const devIdx = accounts[accIdx].devices.findIndex(d => d.device_id === deviceId);
-    if (devIdx === -1) {
-      throw new Error(`Device not found: ${deviceId}`);
-    }
-    accounts[accIdx].devices[devIdx] = { ...accounts[accIdx].devices[devIdx], ...updates };
-    accounts[accIdx].updated_at = new Date().toISOString();
-    await this.saveAccounts(accounts);
+    await this.withAccounts((accounts) => {
+      const accIdx = accounts.findIndex(a => a.id === accountId);
+      if (accIdx === -1) {
+        throw new Error(`Account not found: ${accountId}`);
+      }
+      const devices = accounts[accIdx].devices || [];
+      const devIdx = devices.findIndex(d => d.device_id === deviceId);
+      if (devIdx === -1) {
+        throw new Error(`Device not found: ${deviceId}`);
+      }
+      devices[devIdx] = { ...devices[devIdx], ...updates };
+      accounts[accIdx].devices = devices;
+      accounts[accIdx].updated_at = new Date().toISOString();
+    });
   }
 
   /** 设置账号最后选中的设备 */

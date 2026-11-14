@@ -180,6 +180,7 @@ export interface PluginConfig {
   external_search_no_import: boolean;   // 不入库直接播放：命中直链型结果时直接把原始 URL 推给音箱，不写入曲库（临时链接友好）
   search_priority: SearchPriority;     // 搜歌优先级策略
   music_api_model_disabled?: string[]; // 显式禁用 Music API 的型号（覆盖内置默认清单）
+  music_api_model_enabled?: string[];  // 显式启用 Music API 的型号（让默认清单外的新型号也能走 Music API）
   indicator_light_enabled?: boolean;
   default_cover_id?: string;
   touchscreen_lyrics_enabled?: boolean; // 触屏歌词：逐首匹配云端曲库以在触屏音箱显示歌词
