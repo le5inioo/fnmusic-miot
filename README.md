@@ -73,7 +73,7 @@ npm run build:all
 
 ## 更新记录
 
-### 2.3.5（2026-11-14 本地构建 + 部署 NAS，**尚未发布 GitHub**）
+### 2.3.5（2026-11-14 正式发布）
 
 > **累积版本**：本版把「2.3.4 后续修复」（OH1P 兼容、扫码账号落盘）与下面新的
 > 「强制 HTTPS 通用兼容」一起承接，正式发布时不再出现同号不同内容。
@@ -91,7 +91,7 @@ npm run build:all
 - **顺手修复**：fnOS 覆盖安装实际是 uninstall → install（走 `install_callback`），之前每次普通升级都会误写「首次端口设置引导」。`install_callback` 现在按 `MIOT_DATA_ROOT/VERSION` 区分真·首次安装与老版本升级，2.3.4 → 2.3.5 不再重复弹引导。
 - **验收**：`_miot_check/test_force_https.mjs` 本地 10 项 ALL PASS（普通 HTTP 零影响 / 301 吸收 / 自签证书 / CDN 302 不误跟随 / 内网判定 / 301 目标保持内网 host / conf 解析 / 网关发现命中 https / `createFnMusicClient` 固化基址 / python token 链路）；该自检在 NAS 上以已安装的 repo 模块复跑同样 ALL PASS。`verify_235.sh` 全绿：`VERSION=2.3.5`、token 不变、8774/8775/8776 全 200、351 首 /16 歌单 `loaded=16 failed=0`、现网零扫描、诊断 `证书策略: http (no TLS)`。
 - 产物：`fnmusic-miot-2.3.5.fpk` 963,336 B / `481938d1…5f8fcbb42`，源码包 954,399 B / `b706b165…8d8a9951`；本地 = NAS = `.sha256` 三处一致，备份 `pre-2.3.5-20261114-222203`。
-- **发布状态**：按用户规则，本轮**未** commit / push / tag / 建 Release；GitHub latest 仍是 `v2.3.4`，需单独授权后再发布。
+- **发布状态（2026-11-14 补记）**：用户明确授权后已发布 GitHub —— commit `18c0e36` 推到 `main`、annotated tag `v2.3.5`、正式 Release（`draft=false` / `prerelease=false` / `make_latest=true`）与 3 个附件，latest 已指向 **v2.3.5**：<https://github.com/le5inioo/fnmusic-miot/releases/tag/v2.3.5>。远端三个附件下载回来与本地逐字节一致（fpk `481938d1…5f8fcbb42`、源码包 `b706b165…8d8a9951`）。
 
 ### 2.3.4 后续修复（2026-11-14 本地构建，**已由 2.3.5 承接**）
 
