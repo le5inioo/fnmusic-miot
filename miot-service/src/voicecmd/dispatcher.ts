@@ -5,6 +5,7 @@ import type { AIChatService } from '../chat/service';
 import type { PlaybackCoordinator } from '../playback/coordinator';
 import { DEFAULT_CHAT_CONFIG, chatScope } from '../chat/types';
 import { conversationQuery } from '../conversation/query';
+import { canFallbackToChat, classifyVoiceIntent } from './intent';
 /** 监听只提交任务；每设备最新消息使旧分析失效。 */
 export class VoiceDispatcher {
   private versions = new Map<string, number>();
@@ -49,7 +50,17 @@ export class VoiceDispatcher {
     });
     if (!current())
       return;
+    const intent = classifyVoiceIntent(message, text);
+    // 设备控制类口令已由小爱 / 米家原生执行并答复，不能再让自定义 LLM 抢答一次。
+    // 旧配置没有这个字段时按 true 处理，升级即生效；面板可显式关闭。
+    const bypass = config.bypass_native_commands !== false && intent.native;
     const active = this.chat.status(account, device);
+    // 追问窗口与「正在回答」算同一轮 AI 对话，可以免触发词继续说。
+    const inFollowup = active.followup_until > Date.now()
+      || ['queued', 'preparing', 'generating', 'speaking', 'resuming'].includes(active.phase);
+    // 把开关的真实值一并打出：面板开关改的是本地值，只有点了保存（或 2.3.6 起的即时保存）
+    // 后端才会变；导出诊断日志可直接核对，不用猜为什么「明明关了」还在回答。
+    songloft.log.info(`[VoiceDispatcher] routing chat_enabled=${config.enabled} require_trigger=${config.require_trigger !== false} fallback=${config.fallback_enabled} bypass=${bypass} followup=${inFollowup} intent=${intent.reason} q="${text.substring(0, 80)}"`);
     if (config.enabled && /^(停止回答|退出对话|结束对话)[。！!\s]*$/.test(text)) {
       await this.chat.cancel(account, device, true, true);
       return;
@@ -76,7 +87,7 @@ export class VoiceDispatcher {
       return;
     }
     const trigger = config.trigger_words.find(word => text.startsWith(word));
-    if (config.enabled && trigger) {
+    if (config.enabled && trigger && !bypass) {
       if (!current())
         return;
       const question = text.slice(trigger.length).replace(/^[，,：:\s]+/, '').trim();
@@ -93,10 +104,24 @@ export class VoiceDispatcher {
     try {
       if (!current())
         return;
-      const canChatFallback = () => config.enabled && (config.fallback_enabled || active.followup_until > Date.now() || ['queued', 'preparing', 'generating', 'speaking', 'resuming'].includes(active.phase));
-      const handled = await this.music.handleMessage(message, { deferResume: true, current, suppressAnalysisFailureHint: canChatFallback });
+      // 旧配置没有 require_trigger 时按 true 处理，升级即生效；关闭后恢复旧行为。
+      const canChatFallback = () => canFallbackToChat({
+        enabled: config.enabled,
+        requireTrigger: config.require_trigger !== false,
+        fallbackEnabled: config.fallback_enabled,
+        hasTrigger: !!trigger,
+        inFollowup,
+        bypass,
+      });
+      // 已拦截的口令连 AI 口令分析都不必发（自定义 OpenAI 兼容连接通常两套 AI 共用）。
+      const handled = await this.music.handleMessage(message, { deferResume: true, current, suppressAnalysisFailureHint: bypass ? () => true : canChatFallback, skipAIAnalysis: bypass });
       if (!current() || handled)
         return;
+      if (bypass) {
+        // 保留小爱自己的执行答复，不播报「未识别」提示、不启动 LLM、不追加 TTS。
+        this.music.resumeUnmatched(account, device);
+        return;
+      }
       if (canChatFallback()) {
         await this.chat.submit(account, device, text, true, current);
         return;

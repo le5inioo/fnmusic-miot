@@ -83,6 +83,35 @@ async function refresh() {
   if (!alive || version !== refreshVersion || identity !== targetQuery.value) return;
   history.value = h.history; total.value = h.total; summary.value = h.summary; memories.value = m.memories;
 }
+// 「启用 AI 对话」等主开关必须切换即落盘。此前它们只是 v-model 本地值，
+// 要滚到页面最底部点「保存设置」才会下发，用户以为关掉了，刷新又读回旧值。
+// 只提交单个字段：后端 saveChatConfig 支持局部更新，不会覆盖同页其它未保存草稿。
+const immediateSaving = ref(false), immediateError = ref('');
+let immediateSeq = 0;
+async function setImmediateFlag(key: 'enabled' | 'require_trigger' | 'bypass_native_commands', value: boolean) {
+  const seq = ++immediateSeq;
+  const previous = config[key];
+  config[key] = value;
+  immediateSaving.value = true;
+  immediateError.value = '';
+  try {
+    const saved = await put<ChatConfig>('/chat/config', { [key]: value });
+    if (seq !== immediateSeq) return;
+    // 只把该字段的服务端权威值同步进基线，保留其它字段的「未保存」状态。
+    const base = JSON.parse(savedConfig.value || '{}') as Record<string, unknown>;
+    base[key] = saved[key];
+    savedConfig.value = JSON.stringify(base);
+    const labels = { enabled: 'AI 对话', require_trigger: '必须说触发词', bypass_native_commands: '不代答设备控制指令' };
+    notify(`${labels[key]}已${value ? '开启' : '关闭'}`, 'success');
+  } catch (e) {
+    if (seq !== immediateSeq) return;
+    config[key] = previous;
+    immediateError.value = `开关保存失败：${messageOf(e)}`;
+    notify(immediateError.value, 'error');
+  } finally {
+    if (seq === immediateSeq) immediateSaving.value = false;
+  }
+}
 async function save() {
   if (config.connection === 'independent') config.custom_headers = parseAIHeaders(customHeaders.value);
   config.trigger_words = triggers.value.split(/[、,，\n]/).map(v => v.trim()).filter(Boolean);
@@ -138,11 +167,15 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
 <template>
   <fieldset class="chat-settings" :disabled="busy || !loaded">
     <p v-if="error" role="alert" class="chat-error">{{ error }}</p>
-    <SectionCard title="AI 对话" description="与音乐口令分析分别启用。默认说“请问……”开始，回答后可继续追问。">
+    <SectionCard title="AI 对话" description="与音乐口令分析分别启用。默认须说“请问……”才开始，回答后可继续追问；设备控制指令保留小爱自己的答复。">
       <div class="form-body">
-      <SettingRow title="启用 AI 对话"><SlSwitch v-model="config.enabled" :disabled="!loaded || busy" aria-label="启用 AI 对话" /></SettingRow>
+      <SettingRow title="启用 AI 对话" subtitle="切换后立即保存生效，无需点底部「保存设置」。"><SlSwitch :model-value="config.enabled" :disabled="!loaded || busy || immediateSaving" aria-label="启用 AI 对话" @update:model-value="setImmediateFlag('enabled', $event)" /></SettingRow>
+      <p v-if="immediateSaving" role="status">正在保存开关……</p>
+      <p v-if="immediateError" role="alert" class="chat-error">{{ immediateError }}</p>
       <p v-if="!state.config.conversation_monitor_enabled">语音问答需要对话监听。<SlButton label="一并开启监听" variant="outlined" @click="safeAction(async () => { await saveConfig({ conversation_monitor_enabled: true }); })" /></p>
       <label class="chat-field">触发词（用顿号或逗号分隔）<SlInput v-model="triggers" aria-label="问答触发词" /></label>
+      <SettingRow title="必须说触发词" subtitle="没有触发词的语音不会启动 AI；上一轮回答后的追问仍可免触发词。"><SlSwitch :model-value="config.require_trigger" :disabled="!loaded || busy || immediateSaving" aria-label="必须说触发词" @update:model-value="setImmediateFlag('require_trigger', $event)" /></SettingRow>
+      <SettingRow title="不代答设备控制指令" subtitle="开关灯、调空调等已由小爱执行的口令，不再发一份给自定义模型抢答。"><SlSwitch :model-value="config.bypass_native_commands" :disabled="!loaded || busy || immediateSaving" aria-label="不代答设备控制指令" @update:model-value="setImmediateFlag('bypass_native_commands', $event)" /></SettingRow>
       <SettingRow title="每轮回答后恢复原音乐"><SlSwitch v-model="config.resume_music" aria-label="回答后恢复音乐" /></SettingRow>
       <SettingRow title="等待时播报提示" subtitle="提问后说“收到，正在思考”，模型请求同时开始。"><SlSwitch v-model="config.waiting_feedback" aria-label="等待时播报提示" /></SettingRow>
       <p>追问仍需唤醒音箱。分组播放时全组暂停，仅提问设备回答；播报结束无法确认时保持暂停。DLNA 投放中请先停止投放。</p>
@@ -209,7 +242,7 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
       <AIHeadersField v-if="config.connection === 'independent'" v-model="customHeaders" label="问答自定义请求头" />
       <label class="chat-field">请求超时（1–30 秒）<SlInput :model-value="String(config.timeout)" type="number" aria-label="问答超时" @update:model-value="config.timeout = Number($event)" /></label>
       <label class="chat-field">角色提示词<textarea v-model="config.system_prompt" class="sl-input chat-textarea" aria-label="角色提示词" maxlength="4000"></textarea></label>
-      <SettingRow title="音乐口令未命中后交给 AI"><SlSwitch v-model="config.fallback_enabled" aria-label="兜底问答" /></SettingRow>
+      <SettingRow title="音乐口令未命中后交给 AI" subtitle="仅在说了触发词或追问窗口内生效；开启「必须说触发词」后不会让设备口令变成提问。"><SlSwitch v-model="config.fallback_enabled" aria-label="兜底问答" /></SettingRow>
       <label class="chat-field">追问窗口（秒，0 关闭）<SlInput :model-value="String(config.followup_seconds)" type="number" aria-label="追问窗口" @update:model-value="config.followup_seconds = Number($event)" /></label>
       <p>追问窗口决定哪些话交给 AI；历史上下文决定 AI 能参考哪些问答。</p>
       <SettingRow title="实时显示回答" subtitle="逐步显示模型生成的文字，音箱仍等待完整回答后播报。接口不支持时可关闭。"><SlSwitch v-model="config.streaming_enabled" aria-label="实时显示回答" /></SettingRow>
@@ -219,6 +252,7 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
     </SectionCard>
     <div class="chat-save">
       <span v-if="dirty" role="status">有未保存的修改</span>
+      <span class="chat-help">AI 对话主开关已即时生效，此处保存其它设置。</span>
       <SlButton label="保存设置" :disabled="busy || !loaded || !dirty" @click="safeAction(save)" />
     </div>
     <SectionCard title="对话测试" description="使用当前选中的受管理音箱。关闭播报可测试模型而不暂停音乐。">

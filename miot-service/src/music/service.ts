@@ -44,6 +44,8 @@ interface MessageOptions {
   current?: () => boolean;
   /** 聊天会接手未匹配消息时，由聊天链路反馈失败。 */
   suppressAnalysisFailureHint?: () => boolean;
+  /** 已由小爱原生处理的设备控制口令：连 AI 口令分析也不必发一次模型请求。 */
+  skipAIAnalysis?: boolean;
 }
 
 interface CommandContext {
@@ -377,9 +379,10 @@ export class MusicCommandService {
 
     songloft.log.info(`[MusicCommandService] [Rule] No search match found`);
 
-    // AI 兜底（如果启用）
+    // AI 兜底（如果启用）。设备控制类口令已由小爱原生执行，跳过后半段分析：
+    // 两套 AI 通常共用同一个 OpenAI 兼容连接，多发一次请求也会产生费用和长回复。
     const aiConfig = await this.configManager.getAIConfig();
-    if (aiConfig.enabled) {
+    if (aiConfig.enabled && !options.skipAIAnalysis) {
       songloft.log.info(`[MusicCommandService] [AI] Analyzing query="${query}"`);
       const aiResult = await this.aiAnalyzer.analyze(query, aiConfig, options.current, JSON.stringify([accountId, msg.device_id]));
       if (options.current?.() === false) return false;

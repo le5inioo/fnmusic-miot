@@ -46,7 +46,13 @@ export function registerChatHandlers(router: Router, config: ConfigManager, chat
   };
   const target = (req: HTTPRequest, body?: Record<string, unknown>) => validateChatTarget(config, body || parseQuery(req.query));
   router.get('/chat/capabilities', wrap(async () => jsonResponse({ streaming: typeof songloft.net?.httpStream === 'function' })));
-  router.get('/chat/config', wrap(async () => jsonResponse(await config.getChatConfig())));
+  // 开关值必须每次读盘：浏览器/反代一旦缓存了这个 GET，用户关掉 AI 对话后刷新
+  // 仍会显示旧值，看起来像「开关关不掉」。显式禁止任何一层缓存。
+  router.get('/chat/config', wrap(async () => ({
+    statusCode: 200,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
+    body: JSON.stringify(await config.getChatConfig()),
+  })));
   router.put('/chat/config', wrap(async (req) => {
     const next = await config.saveChatConfig(chatBody(req) as Partial<ChatConfig>);
     await chat.cancelAll();

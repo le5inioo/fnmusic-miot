@@ -73,6 +73,27 @@ npm run build:all
 
 ## 更新记录
 
+### 2.3.6（2026-11-15 正式发布）
+
+> **本版同时承接上一轮更换的紫粉渐变应用图标**（64/128/256 零重采样，其余档位从 256 一次缩小）。
+
+- **修复「AI 设置里『启用 AI 对话』关不掉，刷新又显示打开」**
+  - **实测根因不在服务端**：在现网按面板同一条链路做 `GET /chat/config` → 改成 `enabled:false` → `PUT /chat/config` → 再 `GET`，服务端 **200 且磁盘 `chat_config:v1` 同步变为 false**（验证后已恢复用户原值）。问题在面板：`enabled` 只是 `v-model` 本地值，必须滚到页面最底部点「保存设置」才下发；该按钮默认禁用，且失败提示在页面最顶部，很容易以为「已经关了」。
+  - **修复**：「启用 AI 对话」及本版新增的两个约束开关改为**切换即局部 PUT `{key: value}`**，成功/失败就地提示、失败自动回滚，不再依赖底部保存按钮；局部更新不会覆盖同页其它未保存草稿。`GET /chat/config` 显式 `Cache-Control: no-store`，面板所有请求加 `cache: 'no-store'`，杜绝刷新读到旧开关值。
+- **修复「触发词『请问 / 问一下』形同虚设，没说触发词也会触发 AI 对话」**
+  - **实测根因**：现网 `chat_config:v1` 里 `enabled: true` 且 **`fallback_enabled: true`**（「音乐口令未命中后交给 AI」藏在高级设置折叠里）。`voicecmd/dispatcher.ts` 的兜底、60 秒追问窗口、对话活跃期三条分支都会**绕过触发词**把任何未命中音乐口令的语音提交给 LLM —— 包括「打开客厅顶灯」；聊天历史里确实存着商汤日日新模型对这条设备指令的长篇回复。
+  - **修复**：新增 `require_trigger`（默认 **true**，旧配置缺省也按 true，升级即生效）作为首次提问的硬门槛；`fallback_enabled` 只能决定「带触发词或追问时是否兜底」，不能再单独把任意语音送进 LLM。上一轮 AI 回答后的追问仍可免触发词，不破坏连续对话体验。显式关闭该开关可恢复旧行为。
+- **设备控制口令不再被自定义 OpenAI 兼容模型抢答**：新增 `bypass_native_commands`（默认 **true**）与 `src/voicecmd/intent.ts` 通用意图判定 —— 结构化 `domain/action`、文本「动作 + 设备/家居类别词」、云端已播报的执行确认三路信号，不写死任何设备名或品牌；疑问句与音乐口令一律放行。命中后保留小爱自己的执行答复，**不播报「未识别」提示、不启动 LLM、不追加 TTS**，连 `ai_config` 的「AI 口令分析」也一并跳过（两套 AI 常共用同一个连接，多发一次同样产生长回复和费用）。
+- **面板**：「AI 对话」卡片新增「必须说触发词」「不代答设备控制指令」两个即时生效开关；「音乐口令未命中后交给 AI」补充说明其受触发词约束；保存按钮注明主开关已即时生效。
+- **排障日志**：每条轮询语音打印 `[VoiceDispatcher] routing chat_enabled=… require_trigger=… fallback=… bypass=… followup=… intent=… q="…"`，导出诊断日志即可核对开关真实值与拦截原因，不用再猜。
+- **验收**：
+  - 离线：`_miot_check/test_chat_routing.mjs` **53 项全过**（设备意图分类 / 不误伤提问与音乐口令 / 触发词路由矩阵 / 配置默认值与旧配置升级兼容 / 局部保存 / 源码接线契约）。`tsc --noEmit` 只剩 2 个与本版无关的既有报错（`store.ts` 上游遗留 `navigation`），Vite 构建成功。
+  - NAS（`install_236.sh` + `verify_236.sh`，输出 `VERIFY_DONE`）：`VERSION=2.3.6`、systemd active、8775 / 8776 全 200、351 首 / 16 歌单 `loaded=16 failed=0`、token `c345e65c…a546` 不变；`/chat/config` 返回 `Cache-Control: no-store`，旧配置运行时补齐 `require_trigger=true` / `bypass_native_commands=true`；模拟面板局部 PUT `{enabled:false}` 与 `{require_trigger:false}` 均即时落盘且 GET 读回一致（验收后恢复原值）；面板 5 个静态资源全 200、新文案与 3 处 `no-store` 均在。备份 `pre-2.3.6-20261115-131957`。
+  - 升级**没有**擅自改写用户的 `enabled` / `fallback_enabled`（磁盘仍为 `true` / `true`）；仅因验收往返把两个新字段以默认安全值 `true` 写入磁盘，语义与升级后默认一致。
+- 产物：`fnmusic-miot-2.3.6.fpk` **976,815 B** / `f07888c1…9dd03d9`（本地 = NAS `/vol1/` = `.fpk.sha256` 三处一致），源码包 `fnmusic-miot-2.3.6-src.tar.gz` **965,209 B** / `3ec10fc1…1a3bfe104`；`build_236.sh` 逐文件对比显示 `cmd/`、`wizard/`、`host/`、`runtime/`、`config/` 全部未变，差异只落在 bundle / 面板 / 图标 / 文档 / manifest。
+- **待用户侧实测**：对音箱说「打开客厅顶灯」等家居指令，应保留小爱自己的简短答复，不再出现「收到，正在思考」和商汤长回复；说「请问……」仍能正常 AI 对话，回答后追问可免触发词。导出诊断日志可见 `[VoiceDispatcher] routing chat_enabled=… require_trigger=… fallback=… bypass=… followup=… intent=phrase|domain|native_reply`。
+- **发布状态**：经用户明确授权，已发布为 GitHub 正式版 `v2.3.6`（非 draft / 非 prerelease，设为 latest）：https://github.com/le5inioo/fnmusic-miot/releases/tag/v2.3.6 。Release 附件为上述 fpk / `.fpk.sha256` / 源码包，与本地及 NAS 已装产物同源；打包时生成的 fpk 内 README 不含本节事后补记，运行代码不受影响。
+
 ### 2.3.5（2026-11-14 正式发布）
 
 > **累积版本**：本版把「2.3.4 后续修复」（OH1P 兼容、扫码账号落盘）与下面新的

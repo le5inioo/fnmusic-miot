@@ -37,6 +37,7 @@ async function browserRequest<T>(
   const token = pluginApi()?.getAuthToken?.();
   const response = await fetch(`${pluginBase()}${path}`, {
     method,
+    cache: 'no-store',
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -55,6 +56,7 @@ async function browserEnvelope<T>(
   const token = pluginApi()?.getAuthToken?.();
   const response = await fetch(`${pluginBase()}${path}`, {
     method,
+    cache: 'no-store',
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -161,6 +163,7 @@ export async function hostRequest<T = unknown>(
   const token = window.SongloftPlugin?.getAuthToken?.() || '';
   const response = await fetch(`${hostPathPrefix()}${path}`, {
     method,
+    cache: 'no-store',
     headers: {
       ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
