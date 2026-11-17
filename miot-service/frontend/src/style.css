@@ -402,6 +402,7 @@ h1, h2, h3, p { margin: 0; }
 .settings-content::-webkit-scrollbar { display: none; }
 .settings-header { height: 56px; display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
 .settings-header h1 { min-width: 0; flex: 1; font-size: 22px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.settings-version { flex: 0 0 auto; color: var(--md-on-surface-variant); font-size: 12px; font-weight: 400; letter-spacing: 0.2px; white-space: nowrap; opacity: 0.85; }
 .settings-mobile-menu { max-width: 560px; margin: 0 auto; }
 .settings-mobile-menu > .settings-nav-item { margin: 0 0 8px; }
 .miot-section { margin-bottom: 24px; }

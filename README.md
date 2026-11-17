@@ -73,6 +73,22 @@ npm run build:all
 
 ## 更新记录
 
+### 2.3.7（2026-11-17 正式发布）
+
+- **修复「小爱音箱里歌单显示 0 首、语音『播放歌单1』播不了，但歌单下面能看到 33 首」**。这是同一个错误计数 `songCount=0` 引出的两个后果，再叠加一处语音口令解析缺陷，与 2.3.6 无关（相关文件最后实质改动停在 2.1.1）。
+  - **计数回写**：飞牛 `/playlist/list` 的元数据 `trackCount` 常缺字段或恒为 0，而歌曲明细 `/track/playlist-detail/list` 才是准的。现在 `adapter/songs.mjs` 拉过明细后用真实数量记入 `realPlaylistCount` 并在 `listPlaylists()` 覆盖元数据；索引层 `runPlaylistCacheLoad()` 加载完 `plSongs` 后也回写 `pl.songCount`。面板显示与语音判空从此看到同一个准数。
+  - **不再提前判空**：`executePlayPlaylist` 删掉 `songCount===0` 就跳去外部搜单曲的提前 return，改为照常 `pm.play()` 拉真实明细；只有播放层确认加载 0 首（`pm.getTotalSongs()===0` 且非 ID 失效）才走外部兜底，非空歌单不再被误判成空。
+  - **歌单名多形态匹配**：新增 `playlistMatchKey`（中文数字→阿拉伯 + 折叠繁简/装饰 + 剥离「我的/歌单/列表」前缀），让「歌单1 / 歌单一 / 一 / 1 / 我的歌单1」都能命中同一歌单。
+  - **口令兜底**：日志里 ASR 把「播放歌单1」吞成「歌单一」，旧关键词「播放歌单/放歌单/播放列表」零命中。现在补「歌单/列表 + 名称」前缀兜底，且仅在 `play_playlist` 口令启用时生效，尊重用户口令开关。
+- **修复上条「计数回写」引入的 `ReferenceError: fnId is not defined`**（发布前验收拦截）：`getPlaylistSongs()` 里回写 `realPlaylistCount` 时用到的 `fnId` 原先声明在 `else` 块内，块外引用触发块级作用域错误 —— 表现正是「自建/在线歌单加载歌曲失败 `fnId is not defined`」（收藏与虚拟歌单因短路/提前 return 不受影响）。现在把 `fnId` 提升到函数作用域声明、块内改为赋值，自建歌单可正常加载明细并回写计数。
+- **诊断日志降噪**：对话监听每 2 秒刷 6 行轮询，把索引构建、口令路由、播放结果等业务日志挤出导出窗口。现在控制层日志导出时折叠连续轮询的中间行、保留首尾与全部业务行，并在段头注明折叠行数；业务行过少时自动回退原文。
+- **修复「过一会儿自建歌单播不了、要重新说一次」（stale ID 根治）**：飞牛侧歌单 guid 变化（重新保存/扫描 auto-create）会让同一歌单被重新分配 miot id，旧的持久化 ID 变成 `resource not found`。原先只有语音/定时调用方各自做了 refresh+重试，**网页点播 `/player/play`、继续播放、重启恢复这三条路径直接用配置里的旧 ID 调 `pm.play()`，失败后不自愈也不回写**，于是旧 ID 一直留在设备配置里。
+  - 现在把自愈下沉到播放层：`PlaylistManager.play()` / `playPlaylistFromSong()` 在检测到 ID 失效时调用注入的 `staleIdResolver`（`PlaylistManagerMap` 提供），refresh 索引→按歌单名重查新 ID→**回写所有仍引用旧 ID 的设备配置**→用新 ID 重试（带 `resolveDepth<2` 防死循环）。`restoreFromConfig` 同样在 ID 失效时重映射并用新 ID 初始化，避免 `persistState` 把旧 ID 写回。所有播放入口一次修好，不再需要用户重说口令。
+- **「播放音乐」无歌名口令的空队列行为**：`play_song` 空参数原先在内存队列为空时只打一条 warn、什么也不播。现在改为：队列非空仍续播（原行为不变）；**队列为空则从「音乐库全部歌曲」虚拟歌单（id `2_000_000_000`，与 adapter `VIRTUAL_ID_BASE` 对齐）随机挑一首起播**（`pm.play(id, undefined, mode, {randomStart:true})`，先打断当前播报、沿用设备 play_mode、开启切歌播报；全库为空则 TTS 提示）。带歌名的搜歌路径完全不受影响。
+- **设置页显示版本号**：设置页顶部标题栏常驻显示当前版本（如 `v2.3.7`），所有屏宽与分类下可见。版本号由 `vite.config.ts` 在构建时从仓库根 `VERSION` 文件注入为编译期常量（`__APP_VERSION__`），避开面板为静态 bundle、运行时无法读文件的问题；`SettingsPage.vue` 经 script 变量引用后在 AppBar 渲染。**升级打包时必须重新构建前端 static**（单纯替换 bundle 不会更新版本号）。
+- **验收**：`_miot_check/test_playlist_237.mjs` **28 项全过**（歌单名多形态匹配 / 轮询降噪含回退 / 5 处源码接线契约）；`_miot_check/test_fnid_scope.mjs` **6 项全过**（真实注入 mock 适配器跑自建歌单明细加载，证明修复前精确复现 `fnId is not defined` 3 项失败、修复后全绿）；`_miot_check/test_stale_id_heal.mjs` **17 项全过**（真实运行 `play()` 模拟 stale→新 ID，验证 resolver 调用、新 ID 重载、配置回写、无新 ID 时不误自愈，外加 11 条接线契约）；`_miot_check/test_play_random_noqueue.mjs` **20 项全过**（真实打包 service.ts 调用 `executePlaySong('')`，验证队列非空续播 / 队列为空全库随机起播 id+randomStart+沿用 play_mode / 带歌名不受影响，外加 6 条接线契约）；`_miot_check/test_version_in_settings.mjs` **8 项全过**（VERSION→vite define→app.js 字面量→设置页模板引用整条链路）；`tsc --noEmit` 控制层 0 报错（前端 `typecheck` 仍有 2 个既有 `navigation` 报错，与本版无关），官方 `build.mjs` 与前端 `vite build` 均成功。
+- **发布状态**：本版已于 2026-11-17 经用户单独授权正式发布 GitHub —— commit + tag `v2.3.7` + push + Release + 3 个附件齐备，latest 更新为 `v2.3.7`。发布前用户实测发现自建歌单 `fnId is not defined`，已修复并补上回归自检；分析日志第 4 点后又做了 stale ID 根治（见上）。**已重新打包并覆盖安装 NAS**（最终 fpk `f3acc50e…b3d40bffb` / 983,574 B，源码包 `37e0fe79…95af41d7e2a` / 973,022 B，本地 = NAS = `.sha256` = GitHub Release 四处一致；包内 `playWholeLibraryRandom`×2 / 起播日志×1 确认随机起播入包、前端 `app.js` 含 `2.3.7`×1 / `settings-version`×1 确认版本号入包，且含此前 stale 自愈修复）。NAS 验收健康全绿，`/js/app.js` 与 `/static/js/app.js` 经 HTTP 均 200 且含版本号；全库虚拟歌单 `2000000000` 实测可加载 351 首（随机起播数据源）；当前飞牛侧返回 16 个歌单，用户此前自建的「1379」此刻不在列表中（数据源头状态，与播放层修复无关，待用户确认）。
+
 ### 2.3.6（2026-11-15 正式发布）
 
 > **本版同时承接上一轮更换的紫粉渐变应用图标**（64/128/256 零重采样，其余档位从 256 一次缩小）。

@@ -278,6 +278,23 @@ const CHINESE_DIGIT_MAP: Record<string, string> = {
 function normalizeChineseDigits(s: string): string {
   return Array.from(s).map(ch => CHINESE_DIGIT_MAP[ch] ?? ch).join('');
 }
+
+/**
+ * 歌单名匹配用的规范化 key。
+ *
+ * ASR 常把「播放歌单1」听成「歌单一」甚至只留「一」，而歌单本身的命名也五花八门
+ * （「歌单1」「1」「一」「我的歌单一」）。单纯"整串中文数字归一化"只覆盖
+ * 「歌单1 ↔ 歌单一」，覆盖不了「歌单一 ↔ 一」「歌单1 ↔ 1」这类前缀缺失。
+ *
+ * 这里统一：中文数字→阿拉伯数字 → 复用 normalizeForMatch 折叠繁简/小写/去装饰标点，
+ * 再剥掉「我的/歌单/列表/播放列表」等口语前缀，使上述写法都落到同一个 key。
+ * 只用于匹配判定，不影响展示用的原始 name。
+ */
+function playlistMatchKey(s: string): string {
+  let t = normalizeForMatch(normalizeChineseDigits(s || ''));
+  t = t.replace(/^(我的|我的歌单|播放列表|歌单|列表|清单)/, '');
+  return t;
+}
 const pinyinCache = new Map<string, string>();
 
 /** query 分词结果（token + 预转拼音，len<2 的 token 拼音留空不参与拼音匹配） */
@@ -562,6 +579,11 @@ export class IndexingManager {
         try {
           const plSongs = (await songloft.playlists.getSongs(pl.id, { limit: 100000, brief: true } as any)) ?? [];
           if (token !== this.playlistCacheToken) return;
+          // 元数据（飞牛 /playlist/list 的 trackCount）常缺字段或恒为 0，明细才是准的。
+          // 用真实加载到的歌曲数回写，避免语音播放把非空歌单当成空的而提前走外部兜底。
+          if (pl.songCount === 0 && plSongs.length > 0) {
+            pl.songCount = plSongs.length;
+          }
           this.playlistSongsCache.set(pl.id, await this.buildCachedPlaylistSongs(plSongs));
           this.playlistCacheLoadedIds.add(pl.id);
           loaded++;
@@ -855,6 +877,15 @@ export class IndexingManager {
       return plNorm === nameDigitNorm && pl.nameLower !== nameLower;
     });
     if (digitMatch) return digitMatch;
+
+    // 歌单名规范化 key 匹配：中文数字 + 剥离「歌单/我的/列表」前缀 + 装饰折叠。
+    // 让「歌单1」（歌单名）与「1」「一」「歌单一」「我的歌单1」互相命中；
+    // 仅在 key 非空且唯一形态下命中，避免空 key 把任意歌单都当结果。
+    const nameKey = playlistMatchKey(name);
+    if (nameKey) {
+      const keyMatches = this.playlists.filter(pl => playlistMatchKey(pl.name) === nameKey);
+      if (keyMatches.length > 0) return keyMatches[0];
+    }
 
     // 回退到模糊搜索
     const results = this.searchPlaylist(name);

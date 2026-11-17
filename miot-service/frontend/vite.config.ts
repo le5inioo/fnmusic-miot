@@ -1,8 +1,22 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// 设置页显示的版本号来自仓库根 VERSION 文件，构建时注入为编译期常量，
+// 避免运行时依赖 QuickJS 读文件（面板是纯静态 bundle）。
+const FE_DIR = path.dirname(fileURLToPath(import.meta.url));
+let appVersion = 'unknown';
+try {
+  appVersion = fs.readFileSync(path.resolve(FE_DIR, '../../VERSION'), 'utf8').trim() || 'unknown';
+} catch { /* 保持 unknown */ }
 
 export default defineConfig({
   base: './',
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [
     vue(),
     {

@@ -433,6 +433,14 @@ export class PlaylistManager {
   private tempStartSongId = 0;
   private pendingTempArtist: string = ''; // 待恢复的临时歌手名（索引就绪后自动恢复）
   private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
+  // 失效歌单 ID 重映射回调（由 PlaylistManagerMap 注入，持有索引刷新能力）。
+  // 飞牛侧歌单 guid 变化后，同一歌单的 miot id 会改变；旧的持久化和聊 ID 会失效。
+  // 检测到 stale ID 时由此回调 refresh 索引、按歌单名重查新 ID 并回写设备配置，
+  // 让所有播放入口（网页 /player/play、resume、语音、定时）都能就地自愈。
+  private staleIdResolver: ((oldId: number) => Promise<number | null>) | null = null;
+  setStaleIdResolver(resolver: ((oldId: number) => Promise<number | null>) | null): void {
+    this.staleIdResolver = resolver;
+  }
   private hardStopped: boolean = false; // 上次暂停被设备忽略而升级为 stop：设备端已无媒体上下文，续播需重推 URL
   private pausedPositionSec: number = 0; // 暂停瞬间的曲内位置，硬停后据此重推带 seek 的 URL 续播
   private transitionOffset: number = 0;  // 当前歌曲的 song_transition_offset（playCurrent 时缓存，负值=提前切歌）
@@ -565,7 +573,7 @@ export class PlaylistManager {
    * @param opts.randomStart - 忽略 startIndex，加载歌单后随机挑一首作为起点
    * @returns 是否成功
    */
-  async play(playlistId: number, startIndex?: number, mode?: PlayMode, opts?: { randomStart?: boolean; isCurrent?: () => boolean }): Promise<boolean> {
+  async play(playlistId: number, startIndex?: number, mode?: PlayMode, opts?: { randomStart?: boolean; isCurrent?: () => boolean }, resolveDepth: number = 0): Promise<boolean> {
     if (opts?.isCurrent?.() === false) return false;
     this.endExternalPlayback();
     // 立即停止定时器和重置状态，防止 loadPlaylistSongs 期间旧定时器触发 onSongFinished
@@ -577,6 +585,20 @@ export class PlaylistManager {
     // 加载歌单歌曲
     const loaded = await this.loadPlaylistSongs(playlistId, opts?.isCurrent);
     if (!loaded) {
+      // 歌单 ID 失效（飞牛侧 guid 变化导致 miot id 重算）：就地自愈。
+      // 放在 play 层而非各调用方，让网页 /player/play、resume、语音、定时所有入口都受益——
+      // Previously 只有语音/定时调用方各自做了 refresh+重试，网页点播与恢复播放没有，
+      // 于是旧 ID 会一直留在设备配置里，表现为「过一会儿播不了、要重新说一次」。
+      if (this.isLastPlayNotFound() && this.staleIdResolver && resolveDepth < 2 && opts?.isCurrent?.() !== false) {
+        const newId = await this.staleIdResolver(playlistId).catch(e => {
+          songloft.log.warn('[PlaylistManager] play: stale ID resolver failed: ' + String(e));
+          return null;
+        });
+        if (newId && newId > 0 && newId !== playlistId && opts?.isCurrent?.() !== false) {
+          songloft.log.info(`[PlaylistManager] play: stale playlist ID ${playlistId} remapped to ${newId}, retrying`);
+          return this.play(newId, startIndex, mode, opts, resolveDepth + 1);
+        }
+      }
       songloft.log.error('[PlaylistManager] play: loadPlaylistSongs returned false, playlistId=' + playlistId);
       return false;
     }
@@ -628,7 +650,7 @@ export class PlaylistManager {
    * @param fallbackIndex - 歌单内找不到 songId 时的兜底起始下标
    * @returns 是否成功
    */
-  async playPlaylistFromSong(playlistId: number, songId: number, mode?: PlayMode, fallbackIndex?: number, isCurrent?: () => boolean): Promise<boolean> {
+  async playPlaylistFromSong(playlistId: number, songId: number, mode?: PlayMode, fallbackIndex?: number, isCurrent?: () => boolean, resolveDepth: number = 0): Promise<boolean> {
     if (isCurrent?.() === false) return false;
     this.endExternalPlayback();
     // 立即停止定时器和重置状态，防止 loadPlaylistSongs 期间旧定时器触发 onSongFinished
@@ -639,6 +661,18 @@ export class PlaylistManager {
 
     const loaded = await this.loadPlaylistSongs(playlistId, isCurrent);
     if (!loaded) {
+      // 与 play() 同理：失效 ID 就地自愈。新歌单里 songId 通常仍在（同一首歌被重新分配了歌单 id），
+      // 找不到时下方原有的 fallbackIndex 兜底会生效。
+      if (this.isLastPlayNotFound() && this.staleIdResolver && resolveDepth < 2 && isCurrent?.() !== false) {
+        const newId = await this.staleIdResolver(playlistId).catch(e => {
+          songloft.log.warn('[PlaylistManager] playPlaylistFromSong: stale ID resolver failed: ' + String(e));
+          return null;
+        });
+        if (newId && newId > 0 && newId !== playlistId && isCurrent?.() !== false) {
+          songloft.log.info(`[PlaylistManager] playPlaylistFromSong: stale playlist ID ${playlistId} remapped to ${newId}, retrying`);
+          return this.playPlaylistFromSong(newId, songId, mode, fallbackIndex, isCurrent, resolveDepth + 1);
+        }
+      }
       songloft.log.error('[PlaylistManager] playPlaylistFromSong: loadPlaylistSongs returned false, playlistId=' + playlistId);
       return false;
     }
@@ -3963,6 +3997,13 @@ export class PlaylistManager {
  * PlaylistManagerMap - 管理多个设备的播放管理器实例
  * key格式: "accountId:deviceId"
  */
+/** 失效歌单 ID 重映射所需的最小索引能力（IndexingManager 结构兼容，避免循环 import）。 */
+export interface StaleIdIndexSource {
+  getPlaylistById(id: number): { id: number; name: string } | null;
+  findPlaylistByName(name: string): { id: number; name: string } | null;
+  refresh(): Promise<unknown>;
+}
+
 export class PlaylistManagerMap {
   // key: 分组用 'grp:<groupId>'，独立设备用 '<accountId>:<deviceId>'。一个分组共用一个 manager。
   private managers: Map<string, PlaylistManager> = new Map();
@@ -3971,10 +4012,56 @@ export class PlaylistManagerMap {
   private groupsSnapshot: DeviceGroup[] = [];
   private minaService: MinaService;
   private configManager: ConfigManager;
+  private indexSource: StaleIdIndexSource | null = null;
 
   constructor(minaService: MinaService, configManager: ConfigManager) {
     this.minaService = minaService;
     this.configManager = configManager;
+  }
+
+  /** 注入索引能力，用于歌单 ID 失效时按歌单名重查新 ID 并回写设备配置。 */
+  setStaleIdIndexSource(source: StaleIdIndexSource): void {
+    this.indexSource = source;
+  }
+
+  /**
+   * 把一个已失效的歌单 ID 重映射为当前索引里的新 ID，并把新 ID 回写到所有引用旧 ID 的设备配置。
+   * 飞牛侧歌单 guid 变化会让同一歌单重新分配 miot id，旧 id 失效（resource not found）。
+   * 这里先记下旧 id 对应的歌单名，刷新索引后按名字精确重查，命中即回写持久化配置——
+   * 这样下次（网页点播 / 重启恢复 / 语音）不会再拿旧 id，做到一次修好。
+   * @returns 新 id；无法重映射时返回 null。
+   */
+  private async remapStalePlaylistId(oldId: number, accountId: string, deviceId: string): Promise<number | null> {
+    const source = this.indexSource;
+    if (!source || !oldId || oldId <= 0) return null;
+    // 刷新前先取旧 id 的名字（旧 id 此刻仍在内存索引里）
+    let name = '';
+    try {
+      name = source.getPlaylistById(oldId)?.name || '';
+    } catch (e) {
+      songloft.log.warn(`[PlaylistManagerMap] remap: getPlaylistById(${oldId}) failed: ${String(e)}`);
+    }
+    await source.refresh().catch(e => songloft.log.warn('[PlaylistManagerMap] remap: refresh failed: ' + String(e)));
+    let fresh: { id: number; name: string } | null = null;
+    try {
+      fresh = name ? source.findPlaylistByName(name) : source.getPlaylistById(oldId);
+    } catch (e) {
+      songloft.log.warn(`[PlaylistManagerMap] remap: findPlaylistByName(${name}) failed: ${String(e)}`);
+    }
+    if (!fresh || fresh.id === oldId || fresh.id <= 0) return null;
+    // 回写所有仍引用旧 id 的设备配置（分组/多设备时可能不止一台），避免下次再失效
+    try {
+      const devices = await this.configManager.getDevices(accountId);
+      for (const dev of devices) {
+        if (dev.playlist_id === oldId) {
+          await this.configManager.updateDevice(accountId, dev.device_id, { playlist_id: fresh.id });
+          songloft.log.info(`[PlaylistManagerMap] remapped stale playlist id ${oldId} -> ${fresh.id} (${fresh.name}) for device ${dev.device_id}`);
+        }
+      }
+    } catch (e) {
+      songloft.log.warn('[PlaylistManagerMap] remap: persist new playlist id failed: ' + String(e));
+    }
+    return fresh.id;
   }
 
   /**
@@ -4079,6 +4166,9 @@ export class PlaylistManagerMap {
     }
 
     const manager = new PlaylistManager(primary.account_id, primary.device_id, this.minaService, this.configManager);
+    // 注入失效 ID 重映射回调：play() 检测到 stale ID 时会 refresh 索引、按歌单名重查新 ID、
+    // 回写设备配置并用新 ID 重试。这样网页点播、重启恢复等不经语音的路径也能就地自愈。
+    manager.setStaleIdResolver((oldId) => this.remapStalePlaylistId(oldId, primary.account_id, primary.device_id));
     manager.setTargets(targets);
 
     // 从主设备配置恢复播放列表状态（本身不发设备指令）
@@ -4262,11 +4352,14 @@ export class PlaylistManagerMap {
       let songs: Song[] = [];
       let sortBy = '';
       let sortOrder = '';
+      let idMissing = false; // 配置里的歌单 ID 是否已在宿主侧失效（guid 变化导致 miot id 重算）
       try {
         const pl: any = await songloft.playlists.getById(devCfg.playlist_id);
         if (pl && pl.sort_by) {
           sortBy = pl.sort_by;
           sortOrder = pl.sort_order || 'asc';
+        } else if (!pl) {
+          idMissing = true;
         }
       } catch (e) {
         songloft.log.warn(`[PlaylistManagerMap] restoreFromConfig: getById for sort failed: ${String(e)}`);
@@ -4282,16 +4375,40 @@ export class PlaylistManagerMap {
         songloft.log.warn('[PlaylistManagerMap] Failed to load songs via bridge: ' + String(e));
       }
 
+      // 歌单 ID 失效时（getById 拿不到）：refresh 索引按歌单名重查新 ID、回写配置，用新 ID 重新加载。
+      // 否则重启恢复会一直用旧 ID、恢复出空队列，表现为「重启后歌单不翼而飞」。
+      let effectivePlaylistId = devCfg.playlist_id;
+      if (idMissing && songs.length === 0 && devCfg.playlist_id > 0) {
+        const newId = await this.remapStalePlaylistId(devCfg.playlist_id, accountId, deviceId);
+        if (newId && newId !== devCfg.playlist_id) {
+          try {
+            const fresh: any = await songloft.playlists.getById(newId);
+            if (fresh?.sort_by) {
+              sortBy = fresh.sort_by;
+              sortOrder = fresh.sort_order || 'asc';
+            }
+            const freshSongs = await songloft.playlists.getSongs(newId, { limit: 100000, sort: sortBy, order: sortOrder } as any);
+            if (Array.isArray(freshSongs) && freshSongs.length > 0) {
+              songs = freshSongs as any;
+              effectivePlaylistId = newId; // 用新 ID 初始化，避免 persistState 又把旧 ID 写回配置
+              songloft.log.info(`[PlaylistManagerMap] restoreFromConfig: stale id ${devCfg.playlist_id} remapped to ${newId}, songs=${freshSongs.length}`);
+            }
+          } catch (e) {
+            songloft.log.warn('[PlaylistManagerMap] restoreFromConfig remap reload failed: ' + String(e));
+          }
+        }
+      }
+
       if (songs.length > 0) {
         const startIndex = devCfg.current_song_index || 0;
         const playMode = normalizePlayMode(devCfg.play_mode);
-        manager.initWithSongs(songs, startIndex, playMode, devCfg.playlist_id);
+        manager.initWithSongs(songs, startIndex, playMode, effectivePlaylistId);
         // 恢复持久化的倍速（缺省 1.0）。仅设字段，不触发重推——恢复时本就不在播。
         const speed = typeof devCfg.play_speed === 'number' && devCfg.play_speed > 0
           ? Math.max(0.5, Math.min(2, devCfg.play_speed))
           : 1;
         (manager as any).playbackSpeed = speed;
-        songloft.log.info(`[PlaylistManagerMap] Restored playlist from config playlistId=${devCfg.playlist_id} index=${startIndex} mode=${playMode} speed=${speed}`);
+        songloft.log.info(`[PlaylistManagerMap] Restored playlist from config playlistId=${effectivePlaylistId} index=${startIndex} mode=${playMode} speed=${speed}`);
 
         const resumeState = devCfg.resume_state || '';
         if (resumeState === 'playing' || resumeState === 'paused') {

@@ -164,6 +164,11 @@ const BUILTIN_PLAY_KEYWORDS = [
   '来首歌', '点首歌', '点歌', '听歌', '放音乐', '放歌', '播放',
 ];
 
+// 「播放音乐」这类无歌名口令在无活动队列时的兜底源：音乐库全部歌曲。
+// 该 id 必须与 miot-service/adapter/songs.mjs 的 VIRTUAL_ID_BASE 一致，
+// 否则桥接层加载不到全库虚拟视图。
+const WHOLE_LIBRARY_PLAYLIST_ID = 2_000_000_000;
+
 /**
  * 插件 SDK 的 parseBody() 按 latin1 解码请求体，中文会以「一个字节一个字符」
  * 的形态到达（「播放」变成 6 个 latin1 字符）。历史保存的口令可能是这种乱码，
@@ -891,6 +896,19 @@ export class MusicCommandService {
       return bestMatch;
     }
 
+    // ASR 常把「播放歌单1」吞成「歌单一」「歌单1」，丢掉「播放」二字后第一趟关键词
+    // 零命中，第二趟跳字兜底又因关键词最短 3 字而够不着。这里按「歌单/列表 + 名称」
+    // 前缀兜底接管；仅当 play_playlist 口令仍启用时才生效，尊重用户的口令开关。
+    for (const prefix of ['播放列表', '放歌单', '歌单', '列表']) {
+      if (q.startsWith(prefix)) {
+        const pp = enabledCommands.find(e => e.cmd.type === 'play_playlist');
+        if (pp) {
+          return { command: pp.cmd, keyword: prefix, argument: q.slice(prefix.length).trim() };
+        }
+        break;
+      }
+    }
+
     // 第二趟：精确匹配零命中时，跑有界跳字子序列兜底（如"我想听" ⊇ "我今天想听"）。
     // tiebreak 与第一趟一致：最长关键词 > inserted 最小 > 高优先级。
     const qRunes = Array.from(q);
@@ -1161,10 +1179,12 @@ export class MusicCommandService {
       return;
     }
 
+    // 计数元数据（飞牛 /playlist/list 的 trackCount）常缺字段或恒为 0，但明细里其实有歌。
+    // 不能再用 songCount===0 提前判空并跳去外部搜索——那会让「显示 0 但有 33 首」的歌单
+    // 永远播不了。改为照常尝试 pm.play()：播放层会 loadPlaylistSongs 拉真实明细，
+    // 真·空歌单它会返回 false 并打 [PlaylistManager] Playlist is empty，再由下方失败分支兜底。
     if (hasExplicitName && matchedPlaylist.songCount === 0) {
-      songloft.log.warn(`[MusicCommandService] Playlist is empty: ${playlistName}, trying external search`);
-      await this.playExternalFallback(playlistName, pm, accountId, deviceId, `歌单${playlistName}为空，外部搜索未找到可播放歌曲`);
-      return;
+      songloft.log.info(`[MusicCommandService] 歌单元数据计数为 0，仍尝试按真实明细播放（不再提前判空）: ${playlistName}`);
     }
 
     songloft.log.info(`[MusicCommandService] Matched playlist: ${matchedPlaylist.name} (id=${matchedPlaylist.id})`);
@@ -1209,6 +1229,15 @@ export class MusicCommandService {
         }
       }
       songloft.log.error(`[MusicCommandService] Retry play playlist failed after index refresh: ${playlistName}`);
+      return;
+    }
+
+    // pm.play() 失败且不是「ID 失效」（上面重试分支已处理），再确认是不是真·空歌单：
+    // 播放层 loadPlaylistSongs 成功但 songs 为空时 isLastPlayNotFound() 为 false 且总数 0。
+    // 只有这时才退回外部搜索；非空歌单的失败只记 error，不再误播单曲。
+    if (hasExplicitName && pm.getTotalSongs() === 0 && !pm.isLastPlayNotFound()) {
+      songloft.log.warn(`[MusicCommandService] Playlist truly empty (0 songs loaded): ${playlistName}, trying external search`);
+      await this.playExternalFallback(playlistName, pm, accountId, deviceId, `歌单${playlistName}为空，外部搜索未找到可播放歌曲`);
       return;
     }
 
@@ -1269,14 +1298,17 @@ export class MusicCommandService {
     // 本地多字段搜索用歌名+歌手（配合 cover 匹配提升命中）；在线 hint / TTS 文案仍用纯歌名
     const searchTerm = artist && artist.trim() ? `${songName} ${artist.trim()}` : songName;
 
-    // 空参数处理：继续上次播放
+    // 空参数处理：「播放音乐」这类泛用起播口令
     if (!songName) {
       if (pm.hasPlaylist()) {
+        // 已有队列：续播下一首（保持原行为）
         songloft.log.info('[MusicCommandService] Play song: resume last playback');
-        const ok = await pm.next();
+        await pm.next();
         return null;
       }
-      songloft.log.warn('[MusicCommandService] No song name specified and no active playlist');
+      // 无队列：从「音乐库全部歌曲」随机挑一首起播，而不是静默什么也不做。
+      songloft.log.info('[MusicCommandService] Play song: no active playlist, starting random playback from whole library');
+      await this.playWholeLibraryRandom(accountId, deviceId, pm);
       return null;
     }
 
@@ -1343,6 +1375,44 @@ export class MusicCommandService {
     songloft.log.warn(`[MusicCommandService] Song not found or failed to play: ${songName}`);
     await this.minaService.textToSpeech(accountId, deviceId, `未找到歌曲：${songName}`);
     return null;
+  }
+
+  /**
+   * 「播放音乐」这类无歌名口令且无活动队列时的兜底：从「音乐库全部歌曲」
+   * 虚拟歌单随机挑一首起播。起点随机（randomStart），后续切歌沿用设备既定
+   * 播放模式，尊重用户在设置页的选择。虚拟歌单 id 与 adapter 的 VIRTUAL_ID_BASE 对齐。
+   */
+  private async playWholeLibraryRandom(accountId: string, deviceId: string, pm: PlaylistManager): Promise<void> {
+    // 打断音箱当前播报（与有歌名的搜歌路径一致）
+    try {
+      await this.minaService.stopPlay(accountId, deviceId);
+    } catch (e) {
+      songloft.log.warn('[MusicCommandService] whole-library stopPlay failed: ' + String(e));
+    }
+
+    // 沿用设备既定播放模式；仅起点随机
+    let playMode: PlayMode = 'random';
+    try {
+      const devices = await this.configManager.getDevices(accountId);
+      const devCfg = devices.find(d => d.device_id === deviceId);
+      if (devCfg && devCfg.play_mode) playMode = devCfg.play_mode as PlayMode;
+    } catch (e) {
+      songloft.log.warn('[MusicCommandService] whole-library read play_mode failed: ' + String(e));
+    }
+
+    pm.setAnnounceOnSongChange(true);
+    const ok = await pm.play(WHOLE_LIBRARY_PLAYLIST_ID, undefined, playMode, { randomStart: true });
+    if (ok) {
+      songloft.log.info(`[MusicCommandService] Whole-library random playback started (id=${WHOLE_LIBRARY_PLAYLIST_ID}, mode=${playMode}, total=${pm.getTotalSongs()})`);
+      return;
+    }
+
+    songloft.log.error('[MusicCommandService] Whole-library random playback failed');
+    try {
+      await this.minaService.textToSpeech(accountId, deviceId, '音乐库暂时没有可播放的歌曲');
+    } catch (e) {
+      songloft.log.warn('[MusicCommandService] whole-library failure TTS failed: ' + String(e));
+    }
   }
 
   private stripArtistSuffix(argument: string): string {

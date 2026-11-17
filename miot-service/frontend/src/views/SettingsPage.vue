@@ -14,6 +14,9 @@ import { state } from '../store';
 import { openSelect } from '../ui/selectState';
 
 const isNarrow = ref(typeof window !== 'undefined' && window.innerWidth < 600);
+// 构建时注入的版本号（vite.config.ts define），经 script 变量供模板使用，
+// 避免模板里直接写 __APP_VERSION__ 被编译成渲染上下文属性访问。
+const appVersion = __APP_VERSION__;
 const categories = [
   { id: 'device', title: '设备', subtitle: '服务器、账号和设备分组', icon: 'speaker_group', component: DeviceSettings },
   { id: 'playback', title: '播放', subtitle: '格式、音量和触屏显示', icon: 'music_note', component: PlaybackSettings },
@@ -91,6 +94,7 @@ onUnmounted(() => window.removeEventListener('resize', updateWidth));
       <div class="settings-appbar-inner">
         <AppBar :title="appbarTitle" back @back="back">
           <SlStatusChip v-if="state.configSaving" label="保存中" tone="info" icon="save" />
+          <span class="settings-version" :title="`版本 v${appVersion}`">v{{ appVersion }}</span>
         </AppBar>
       </div>
     </div>

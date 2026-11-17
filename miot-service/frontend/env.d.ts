@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 
+/** 由 vite.config.ts 在构建时从仓库根 VERSION 文件注入。 */
+declare const __APP_VERSION__: string;
+
 declare module '*.vue' {
   import type { DefineComponent } from 'vue';
   const component: DefineComponent<Record<string, never>, Record<string, never>, unknown>;

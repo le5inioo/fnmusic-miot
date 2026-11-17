@@ -98,6 +98,9 @@ async function onInit(): Promise<void> {
   authService = new AuthService(configManager, accountManager);
   minaService = new MinaService(accountManager, configManager);
   playlistManagerMap = new PlaylistManagerMap(minaService, configManager);
+  // 让播放层在歌单 ID 失效（飞牛侧 guid 变化导致 miot id 重算）时能 refresh 索引、
+  // 按歌单名重查新 ID 并回写设备配置——覆盖网页点播/恢复播放等不经语音的入口。
+  playlistManagerMap.setStaleIdIndexSource(indexingManager);
   groupCoordinator = new GroupCoordinator(playlistManagerMap, minaService, configManager);
   // 加载分组快照，使 PlaylistManagerMap 能同步把分组设备解析到共享 manager（多房间共用一套播放列表）
   await playlistManagerMap.refreshGroups();

@@ -80,6 +80,10 @@ export function createMusicAdapter({ fn, storage, log, cfg }) {
   const songById = new Map();
   const fnPlaylistByMiotId = new Map();
   const miotPlaylistByFnId = new Map();
+  // 飞牛 /playlist/list 的 trackCount 常缺字段或恒为 0（用户实测「歌单显示 0 但下面 33 首」）。
+  // 明细接口 /track/playlist-detail/list 才是准的。拉过明细后把真实数量记在这里，
+  // listPlaylists() 用它覆盖元数据里的 0，避免面板显示 0 与语音判空同时中招。
+  const realPlaylistCount = new Map();
   let deleted = new Set();
 
   // Virtual (library/folder) playlist metadata and a short-lived cache of the
@@ -375,6 +379,14 @@ export function createMusicAdapter({ fn, storage, log, cfg }) {
       } catch (err) {
         log.warn?.(`[songs] listPlaylists virtual: ${err.message}`);
       }
+      // 已拉过明细的歌单用真实数量覆盖元数据的 0/缺失，保证「面板显示」与
+      // 「语音判空」看到同一个准数。只覆盖 >0 的值，避免真实空歌单被误填。
+      for (const pl of out) {
+        const real = realPlaylistCount.get(pl.id);
+        if (real !== undefined && real > 0 && pl.song_count !== real) {
+          pl.song_count = real;
+        }
+      }
       return out;
     },
     async getPlaylistById(id) {
@@ -388,6 +400,9 @@ export function createMusicAdapter({ fn, storage, log, cfg }) {
     },
     async getPlaylistSongs(id, options = {}) {
       const num = Number(id);
+      // 提升到函数作用域：块内的 const fnId 在 else 块外不可见，
+      // 导致明细数量回写处 (下方) 抛 ReferenceError: fnId is not defined。
+      let fnId;
 
       // Virtual library views: /track/list ignores all path-filter
       // params, so filter the cached full library by audioSpec.path prefix.
@@ -417,7 +432,7 @@ export function createMusicAdapter({ fn, storage, log, cfg }) {
           if (!chunk.length || (total && rows.length >= total)) break;
         }
       } else {
-        const fnId = fnPlaylistByMiotId.get(num);
+        fnId = fnPlaylistByMiotId.get(num);
         // Stale Songloft playlist_progress keys have no official API
         // counterpart. Returning an empty list keeps the library cache quiet.
         if (fnId === undefined) return [];
@@ -438,6 +453,11 @@ export function createMusicAdapter({ fn, storage, log, cfg }) {
       }
       let songs = rows.map(register).filter(Boolean).filter((s) => !deleted.has(s.id));
       if (options.sort === 'title') songs = songs.sort((a, b) => a.title.localeCompare(b.title));
+      // 明细是唯一可信的数量来源：记下来供 listPlaylists 覆盖元数据缺字段/0 的情况。
+      // 只在真正拉到明细（rows 非空循环执行过）时写，虚拟歌单走上面的分支不在此列。
+      if (num !== FAVORITE_PLAYLIST_ID && fnId !== undefined) {
+        realPlaylistCount.set(num, songs.length);
+      }
       const offset = options.offset ?? 0;
       return songs.slice(offset, offset + (options.limit ?? 100000));
     },

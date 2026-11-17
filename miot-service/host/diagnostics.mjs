@@ -52,6 +52,48 @@ function tailLines(file, maxLines) {
   return lines.length ? lines.slice(-maxLines) : null;
 }
 
+// 对话监听每 2 秒刷 6 行轮询（status/raw response/parsed/attempt/returned/after filter），
+// 会把同一时间窗内真正有用的业务日志（索引构建、口令路由、播放结果、addMessage）挤出去。
+// 这些聚合成一条摘要，既有"轮询确实在跑"的证据，又给业务日志腾出行数。
+// 只匹配明确的轮询噪声，不误伤 addMessage / New messages / 错误 等行。
+const POLL_NOISE_RE = /\[ConversationMonitor\] (doGetLatestAskFromXiaoai|getLatestAskFromXiaoai attempt=|pollDevice\s+\S+\s+(localNowMs=\d+ returned|after filter:|fetch failed))/;
+
+/**
+ * 对控制层日志做有界降噪。纯函数，便于离线自检。
+ * 返回 { lines, dropped, keptPoll }：dropped 是被折叠的轮询行数。
+ * 保底：若降噪后业务行不足 minBusinessLines，则回退原始尾部，避免误删导致信息缺失。
+ */
+export function denoiseControlLog(lines, { minBusinessLines = 40 } = {}) {
+  if (!Array.isArray(lines) || lines.length === 0) return { lines: lines || [], dropped: 0, keptPoll: 0 };
+  let dropped = 0;
+  let keptPoll = 0;
+  const firstPollIdx = lines.findIndex((l) => POLL_NOISE_RE.test(l));
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (POLL_NOISE_RE.test(line)) {
+      // 保留每组轮询的首行与末行做证据，中间连续轮询折叠掉。
+      const prevNoise = i > 0 && POLL_NOISE_RE.test(lines[i - 1]);
+      const nextNoise = i + 1 < lines.length && POLL_NOISE_RE.test(lines[i + 1]);
+      if (!prevNoise || !nextNoise) {
+        out.push(i === firstPollIdx ? '[日志降噪] 以下对话轮询行已折叠，仅保留每组首尾：' : line);
+        keptPoll++;
+      } else {
+        dropped++;
+      }
+    } else {
+      out.push(line);
+    }
+  }
+  const business = out.filter((l) => !POLL_NOISE_RE.test(l) && !l.startsWith('[日志降噪]')).length;
+  if (business < minBusinessLines && dropped > 0) {
+    return { lines, dropped: 0, keptPoll: 0, fallback: true };
+  }
+  return { lines: out, dropped, keptPoll };
+}
+
+export { POLL_NOISE_RE };
+
 function readVersion(cfg) {
   const candidates = [
     process.env.MIOT_VERSION,
@@ -166,12 +208,21 @@ export function createDiagnostics({ cfg, storage, log, gateway = null }) {
       out.push(`最近一次自动发现: ${s.lastDiscover ? JSON.stringify(s.lastDiscover) : '未触发（当前基址可连通）'}`);
     }
     out.push('');
+    // 控制层日志做有界降噪：对话监听每 2 秒 6 行轮询会淹没同窗的业务日志。
+    // 降噪只折叠连续轮询的中间行，保留首尾与全部非轮询行；业务行过少时自动回退原文。
     for (const src of LOG_SOURCES) {
-      out.push(`==== ${src.name} (${src.file}, 最近 ${maxLines} 行) ====`);
+      const isControlLog = src.name.startsWith('miot');
+      out.push(`==== ${src.name} (${src.file}, 最近 ${maxLines} 行${isControlLog ? '，对话轮询已降噪' : ''}) ====`);
       const dir = logDir();
       const lines2 = tailLines(path.join(dir, src.file), maxLines);
       if (lines2) {
-        out.push(...lines2);
+        if (isControlLog) {
+          const d = denoiseControlLog(lines2);
+          if (d.dropped > 0) out.push(`[日志降噪] 本段折叠了 ${d.dropped} 行重复的对话轮询，业务日志与轮询首尾均保留。`);
+          out.push(...d.lines);
+        } else {
+          out.push(...lines2);
+        }
       } else {
         out.push('(不存在或为空)');
       }
