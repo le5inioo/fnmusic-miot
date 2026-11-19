@@ -36,7 +36,7 @@ const webSearchAvailable = computed(() => config.api_protocol === 'responses' ||
 const connectionIdentity = computed(() => JSON.stringify({
   connection: config.connection, api_url: config.api_url, api_key: config.api_key,
   model: config.model, timeout: config.timeout, api_protocol: config.api_protocol,
-  customHeaders: customHeaders.value, web_search_enabled: config.web_search_enabled,
+  customHeaders: customHeaders.value, web_search_enabled: config.web_search_enabled, city: config.city,
   shared: config.connection === 'analysis' ? state.config?.ai_config : undefined,
 }));
 function setWebSearch(enabled: boolean) {
@@ -241,6 +241,7 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
       <p>普通连接可保留兼容模式。自定义服务的内置搜索可尝试搜索工具模式，需服务商和模型支持 Responses。切换后请重新测试。</p>
       <AIHeadersField v-if="config.connection === 'independent'" v-model="customHeaders" label="问答自定义请求头" />
       <label class="chat-field">请求超时（1–30 秒）<SlInput :model-value="String(config.timeout)" type="number" aria-label="问答超时" @update:model-value="config.timeout = Number($event)" /></label>
+      <label class="chat-field">常用城市<SlInput v-model="config.city" aria-label="常用城市" placeholder="例如：浙江嘉兴" maxlength="100" /><small>回答天气等地点相关问题时默认使用此城市，会自动写入提问；需配合联网搜索获取实时天气。留空则不注入。</small></label>
       <label class="chat-field">角色提示词<textarea v-model="config.system_prompt" class="sl-input chat-textarea" aria-label="角色提示词" maxlength="4000"></textarea></label>
       <SettingRow title="音乐口令未命中后交给 AI" subtitle="仅在说了触发词或追问窗口内生效；开启「必须说触发词」后不会让设备口令变成提问。"><SlSwitch v-model="config.fallback_enabled" aria-label="兜底问答" /></SettingRow>
       <label class="chat-field">追问窗口（秒，0 关闭）<SlInput :model-value="String(config.followup_seconds)" type="number" aria-label="追问窗口" @update:model-value="config.followup_seconds = Number($event)" /></label>

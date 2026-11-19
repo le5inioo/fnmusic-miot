@@ -73,7 +73,49 @@ npm run build:all
 
 ## 更新记录
 
-### 2.3.8（2026-11-18 本地构建 + 部署 NAS，未发布 GitHub）
+### 2.3.12（2026-11-19 正式发布 GitHub v2.3.12）
+
+- **新增「常用城市」，修复 AI 回答天气问题不能自动定位 / 推脱**。用户实测问天气，模型反问「哪个城市」或答「无法获取实时信息」。根因是请求里没有任何位置信息。本版在设置页「对话模型与角色」新增「常用城市」输入框（存 `chat_config:v1.city`，留空不注入），`chat/memory.ts` 新增 `isWeatherQuestion()`（天气/气温/下雨/空气质量/穿衣等）、`currentCityContext()` 与 `weatherUserAnchor()`：配置城市后，system 注入「用户所在城市为『XX』……默认就是指该城市，不要再反问城市；开启联网搜索后必须联网查询该城市实时天气，严禁推脱话术」，天气类问题的 user 消息再补一条贴近的城市锚点。与日期问答的加固思路一致（强约束 + 问题锚点），不改动用户自定义 system_prompt 正文（追加在其后）。
+- **修复长回答播报「很久才播下一段 / 部分段落不出声」**。用户换 qwen4-max 后实测「历史上的今天」256 字回答，只有从「1995 年布冯…」开始的第 2 段播出，前面 183 字静默；且第一段空等 49 秒。抓包日志定位到两个叠加根因：
+  - **TTS 分段过长触发设备静默失败**：这台电视的 MiIO TTS 命令通道（siid=7/aiid=3）对超长文本会静默失败——协议层仍返回 `code=0`，但设备端不播。实测 152 / 183 字（约 450+/500+ 字节）不出声，而 73 字（约 220 字节）正常。原分段上限 200 字正好踩雷。`speechSegments()` 单段上限改为 **60 字**（约 ≤180 字节，远低于阈值），并增加「；」等句末标点切分点。真实「历史今天」回答由 2 段（183+73）变为 6 段（48/48/60/27/59/14 字），全部 ≤156 字节。
+  - **播放状态与 TTS 不互通导致空等死循环**：TTS 走 MiIO 命令通道，而 `getPlayState()` 读的是 mediaplayer 通道，两者不通，TTS 播报时 `status` 恒为 0。旧逻辑按 4 字/秒算 protection 后还要凑连续空闲，183 字空等约 49 秒。`SpeechService.speak()` 收尾判定重写为：TTS 回执非 false 即视为已播出（MiIO 命令成功即代表播出），等待时长贴合真实语速（4 字/秒 + 1 秒缓冲）用本地时钟计，`getPlayState` 观察到本轮 playing 再转空闲可提前结束；单段失败不中止整轮。既不再因 status 恒 0 空转死等，也不会早于实际播完就下发下一段造成打断。
+- **回归验证**：`_miot_check/test_fix_2312.mjs` 12 项源码断言全过；`_miot_check/test_segment_2312.mjs` 用真实「历史今天」回答验证 6 段全部 ≤60 字 / ≤156 字节；`npx tsc --noEmit` 通过；前端 `npm run build` 通过，app.js 含「常用城市」+ 版本号 2.3.12。
+- **累积**：包含 2.3.11 日期加固 + 2.3.10 日期注入基础 + 2.3.9 AI 长答案播报中断修复。
+- **发布状态**：本版已于 2026-11-19 经用户单独授权正式发布 GitHub —— commit + annotated tag `v2.3.12` + push + Release + 3 附件齐备，latest 更新为 `v2.3.12`。产物本地 = NAS = GitHub 附件三处同源：fpk `c7262274cbb3851f7af6033ae9effa4405db3f79727ea43044c8596345aea474` / 1,292,070 B（以 `fnmusic-miot-2.3.12.fpk.sha256` 为准），源码包 `fnmusic-miot-2.3.12-src.tar.gz`（hash 见产物清单，README 不写自身 hash 以避免自引用）。NAS 验收 VERSION=2.3.12、systemd active、8775/8776 全 200、token `c345e65c…` 未变、用户 AI 配置完整保留（qwen4-max / dashscope / web_search=true / enabled=true）、`/chat/config` 已带 `city` 字段。逐文件对比 2.3.11：仅 bundle/main.js + static/css/style.css + static/js/app.js + README + VERSION 五个预期文件，无夹带。注：`appcenter-cli uninstall` 需 root 执行（普通用户会因 rpcbroker socket 权限 panic），本次升级已用 root 完成卸载/安装。
+- **实测结论**：播报修复已验证生效——日志确认「历史今天」等多轮问答每段均 `played=true confirmed=true`、等待 12~16 秒不再空等 49 秒，从头到尾播完；「常用城市」注入已生效（回答带上所填城市）。**天气实时数据仍不可靠**：经对照实验确认百炼 `enable_search` / `forced_search` 实测未真正触发联网（问「此刻百度热搜第一」各模型均答查不到、响应无搜索字段），所谓实时天气多为模型编造；连接的 qwen4-max / qwen-plus 均如此。天气 API 直连方案（open-meteo）经评估后**放弃接入**，本版止步于「常用城市 + 强约束提示词」。
+
+### 2.3.11（2026-11-19 本地构建 + 部署 NAS，未发布 GitHub）
+
+- **加固「AI 日期问答」：2.3.10 的日期注入生效但被模型随机忽略**。用户实测问「今天几号」仍答「无法获取实时信息」。抓包确认实际请求里 system **确实带了正确日期**，且历史里有 3 组「问日期→推脱」的旧答案。根因是 2.3.10 的措辞太温和（「以此为准」），小模型（sensenova flash-lite）的推脱倾向被历史答案强化后压过温和陈述，采样时随机出错。本版做两处加固：
+  - **system 强约束**：`currentDateContext()` 措辞改为「这是本系统提供的权威当前时间，你已经确切知道今天的具体日期……**必须直接说出具体年月日，严禁回答『无法获取实时信息』『不能确定今天是哪一天』『请查看设备日历』之类的推脱话术**」。
+  - **user 时间锚点**：新增 `isDateQuestion()`（今天/今日/几号/日期/昨天/明天/星期几/现在几点/几月等）与 `dateUserAnchor()`，仅对**日期类问题**在当前 user 消息末尾追加一段贴近问题的时间锚点；播放音乐、设备控制等其它指令完全不受影响。
+- **回归验证**：`_miot_check/test_date_context_v2.mjs` **22 项全过**（强措辞/日期问题识别含正反例/user 锚点/messages 集成/非日期问题不误伤/自定义前缀保留）；用抓到的真实请求体（含 3 组推脱历史）做真实模型 5 次对照，**5/5 全部正确答出日期**（2.3.10 旧措辞对照 1/3 答错甚至答成别的月份）。`npx tsc --noEmit` 通过。
+- **累积**：包含 2.3.10 日期注入基础 + 2.3.9 AI 长答案播报中断修复。
+- **发布状态**：本版**未发布 GitHub**（按用户规则，发布需单独授权）；已重新打包并覆盖安装 NAS，产物本地 = NAS 一致：fpk `77c6442f0ad4c7ade848491e3e88e45ab3622fcacbf36af2fcb116fd897d7c47` / 1,290,041 B，源码包 `9d90ad0e359df5d175224a7877f283fd4eb6af8b681a2dac1fcfda50d82e6aa6` / 1,281,222 B。NAS 验收 VERSION=2.3.11、systemd active、8775/8776 全 200、token 与 AI 配置不变、17 歌单正常。包内三处修复落地确认（播报 `speech_segments_done`×1、日期基础 `currentDateContext`×2、日期加固 `isDateQuestion`×2/`dateUserAnchor`×2）。逐文件对比 2.3.10：唯一差异 bundle/main.js + README + VERSION + manifest，无夹带。**待用户在面板实测日期问答。**
+
+### 2.3.10（2026-11-19 本地构建 + 部署 NAS，未发布 GitHub）
+
+- **修复「AI 对话不知道今天几号 / 现在几点」**。面板上显示的 `2026/11/19 16:40` 只是前端本地渲染的对话时间戳，不进模型请求；而构造请求的 system 消息只有一句角色设定，没有任何日期锚点，模型拿不到「今天」的参照，只能按训练知识保守推脱。本版在 `chat/memory.ts` 的 `messages()` 里追加 `currentDateContext()`，把设备本地日期时间注入 system 消息末尾：
+  - 内容形如「【当前时间】2026年11月19日 星期四 16:43（设备本地时区）。回答涉及『今天/现在/昨天/明天』等时间概念时，以此为准。」
+  - 用 `getFullYear/getMonth/getDate/getDay/getHours` 等**本地时区** API（与面板、调度器、`holiday.ts` 一致，NAS 为 UTC+8），不用 `toISOString()`（UTC 会差 8 小时）；时分补零。
+  - 追加在用户自定义 `system_prompt` **末尾**，不改动用户已保存提示词；摘要/记忆提取那两处独立请求不注入日期（与对话无关）。
+- **回归验证**：`_miot_check/test_chat_date_context.mjs` 固定时钟 2026-11-19 16:43，**13 项全过**（本地日期/星期/时分补零/时区/前缀保留/注入位置/问题仍在末条）。`npx tsc --noEmit` 通过。
+- **累积**：本版同时包含 2.3.9 的 AI 长答案播报中断修复（见下）。
+- **发布状态**：本版**未发布 GitHub**（按用户规则，发布需单独授权）；已重新打包并覆盖安装 NAS，产物本地 = NAS 一致：fpk `c2719fea2b050f14c6961eb8afee3a43b31813c83b4f0f895949ec629200e0c3` / 1,288,518 B，源码包 `79558f8783f67d3edc334d1d6fac064470b9741addabe3283d957d6e10d05e13` / 1,279,673 B。NAS 验收 VERSION=2.3.10、systemd active、8775/8776 全 200、token 不变、用户 AI 配置未被改写、17 歌单索引正常；包内两处修复标记落地确认（日期 `currentDateContext`×2、播报 `speech_segments_done`×1）。逐文件对比 2.3.9：唯一差异 bundle/main.js + README + VERSION + manifest，无夹带。**待用户在音箱实测日期问答与长答案播报。**
+
+### 2.3.9（2026-11-19 本地构建 + 部署 NAS，未发布 GitHub）
+
+- **修复「AI 对话长答案播报未播完就中断」**。根因在 `chat/speech.ts:speak()`：长答案被切成多段逐段播报，旧实现任一段的「播完收尾判定」失败就 `return 'unknown'`，导致后面所有段都不播——段数越多（长答案 4–6 段）越容易撞上，短答案 1 段几乎不触发，正好解释「只有长答案中断」。本版做五处修复：
+  1. **单段收尾判定失败不再中止整轮**：记录未确认段后继续播下一段，所有段都下发完再统一判定结果。
+  2. **放行 `accepted === null`**：设备回执 3012 超时表示「可能已经播出、不能据以判失败」（见 `mina/client.ts`），旧逻辑把它排除在 idle 判定外，必然跑满超时。
+  3. **`sampledAt` 停滞兜底**：设备空闲时不刷新采样时间时，改用本地轮询时刻继续累计 idle，不再卡死。
+  4. **播完即进下一段**：观察到本轮 playing 后转空闲即快速确认（连续 2 次），不再被按字数估算的 protection（200字≈50s）拖住；设备不报 playing 时 protection 后用连续 3 次空闲兜底。
+  5. **放宽单段上限**：从固定 90 秒改为 `protection + 60 秒`，超时只标记不中止；结果语义：至少一段播完 → `completed` 并恢复音乐，全部未确认 → `unknown` 提示手动恢复。
+- **补强播报诊断日志**：每段与整轮输出 `speech_segment=x/n ... confirmed=...` / `speech_segments_done=... confirmed=... unconfirmed=...`，下次异常可现场定位到具体段。
+- **回归验证**：`_miot_check/test_speech_long_answer.mjs` 用虚拟时钟 + 按段可控状态工厂，同一组 8 场景分别跑修复前（git HEAD）与修复后代码。修复前 4 个中断场景全部失败（accepted=null / sampledAt 停滞 / 单段收尾失败 / 全无状态，均只播 1–2 段即中止），修复后 **8/8 全过**、所有段完整下发；正常场景虚拟等待从 186s 降到 16s。`npx tsc --noEmit` 通过。
+- **发布状态**：本版**未发布 GitHub**（按用户规则，发布需单独授权）；已重新打包并覆盖安装 NAS，产物本地 = NAS 一致：fpk `23fdc6bce4571470c80d95b3e989b0034991f42a4fa75bd9330555ab49ac98fb` / 1,286,092 B，源码包 `be3ea0c7…b18bbaeac` / 1,278,326 B。NAS 验收 VERSION=2.3.9、systemd active、8775/8776 全 200、token 与 AI 配置不变、17 个歌单索引正常；包内 bundle 修复标记 `speech_segments_done`×1 / `speech_cancelled_at`×5 / `confirmedCount`×5 确认入包。逐文件对比 2.3.8：唯一差异为 bundle/main.js（speech 修复）+ README + VERSION + manifest，无夹带。**待用户在音箱实测长答案播报不再中断。**
+
+### 2.3.8（2026-11-18 本地构建 + 部署 NAS；后已于 11-19 发布 GitHub v2.3.8）
 
 - **更换应用图标**（紫粉渐变音量柱新图案，替换旧的紫粉图标）。本次只换图标、不动任何功能代码，2.3.7 的歌单计数/fnId 修复、stale ID 自愈、全库随机起播、设置页版本号等全部保留。
 - **按飞牛「档位占位符」机制处理，根治手机端图标发糊**：飞牛桌面/手机 App 图标由 `ui/config` 的 `"icon": "images/miot_{0}.png"` 注册，`{0}` 是按分辨率选档的占位符；手机 App 请求 `miot_{0}.png` 时不带 `size` 参数，服务端回落到 `miot_64.png`（旧版仅 64×64），在高分屏上放大即发糊。经真实访问日志验证，**飞牛直接返回文件原始字节、不按文件名强制缩放**——因此把 `app/ui/images/miot_*.png` 全部档位（16/32/48/64/72/96/128/160/192/256）内容统一换成同一张 256×256 高清图，手机无论回落哪一档拿到的都是高清图；官方应用（迅雷/DPanel/Motrix）同样是把所有档位塞同一张图。
