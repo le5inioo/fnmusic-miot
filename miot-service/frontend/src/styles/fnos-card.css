@@ -1,0 +1,1300 @@
+/* =============================================================================
+ * fnmusic-miot · fnOS 卡片式外观层
+ * -----------------------------------------------------------------------------
+ * 保留紫罗兰品牌配色（与图标一致），只把面板调成飞牛 OS 内置应用的卡片语言：
+ *   · 浅灰页面底 + 左侧独立浮起的白色导航卡（RanPix 布局）
+ *   · 右侧一整块白色内容大卡，标题带品牌色竖条 + 分割线
+ *   · 导航选中项为淡紫圆角块、每项只一行字
+ *   · 主页面工具栏 / 搜索 / 列表同一张白卡
+ *   · 状态用语义色文字，克制描边与轻阴影
+ *
+ * 取色走 --md-* token，亮/暗自适应；只做外观覆盖不改组件结构。
+ * 整层回退：删掉 main.ts 里对本文件的 import。
+ * 加载顺序在 style.css / redesign.css 之后，同权重覆盖前者。
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------- 页面底色 */
+.page-view,
+.settings-page,
+.miot-page,
+.fullscreen-player {
+  background: var(--md-surface);
+}
+
+/* ------------------------------------------------ 顶栏：白底 + 克制标题 */
+.miot-main-appbar,
+.settings-appbar-shell,
+.fullscreen-appbar-shell {
+  background: var(--md-surface-container-lowest);
+  box-shadow: 0 1px 0 var(--md-outline-variant);
+}
+.appbar-title,
+.miot-appbar-title { font-weight: 500; }
+
+/* 宽屏：去掉顶部横条，把它的空间还给内容；返回入口移到左侧卡（见 .settings-nav-home）。
+   窄屏（<600px）：顶部 appbar 同样去掉，标题栏与返回入口由内容区标题 + 底部标签栏承担
+   （见下方 .settings-bottom-tabs）。 */
+@media (min-width: 600px) {
+  .settings-appbar-shell { display: none; }
+  .settings-page { padding-top: var(--sl-safe-top, 0px); }
+}
+
+/* ------------------------------------------------------------ 左侧导航 */
+/* 对齐 RanPix：导航整体是一张浮起的白色圆角卡，顶部是「返回主页」行 + 分割线，
+   选中项是淡紫圆角块（不是竖条），图标文字变紫；每项只一行。 */
+.settings-nav {
+  width: 200px;
+  flex: 0 0 200px;
+  height: auto;
+  align-self: flex-start;
+  margin: 16px 0 16px 16px;
+  padding: 0 12px 12px;
+  overflow-y: visible;
+  background: var(--md-surface-container-lowest);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 14px;
+  box-shadow: var(--md-shadow-1);
+}
+/* 返回主页：带返回图标，高度与右侧标题行一致，下边框即两条对齐的分割线 */
+.settings-nav-home {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 56px;
+  padding: 0 10px;
+  margin-bottom: 8px;
+  border: 0;
+  border-bottom: 1px solid var(--md-outline-variant);
+  background: transparent;
+  color: var(--md-primary);
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+/* 返回箭头：紫色圆底 + 白色图标，与下方导航图标同左对齐（圆底略小一档） */
+.settings-nav-home-icon {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+.settings-nav-home-icon .sl-icon { color: var(--md-on-primary); }
+/* 每项只保留一行标题，第二排小字去掉 */
+.settings-nav-subtitle { display: none; }
+.settings-nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-bottom: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.settings-nav-item:hover { background: var(--md-surface-container-low); }
+.settings-nav-item.active {
+  background: var(--md-primary-container);
+  color: var(--md-primary);
+  box-shadow: none;
+}
+/* RanPix 选中态是整块淡紫圆角，不要竖条 */
+.settings-nav-item.active::before { display: none; }
+.settings-nav-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  border-radius: 7px;
+  background: transparent;
+}
+.settings-nav-item.active .settings-nav-icon {
+  background: transparent;
+  color: var(--md-primary);
+}
+.settings-nav-item.active .settings-nav-icon::before { display: none; }
+.settings-nav-item.active .settings-nav-title { color: var(--md-primary); }
+.settings-nav-title { font-weight: 400; line-height: 20px; }
+.settings-nav-item.active .settings-nav-title { font-weight: 600; }
+
+/* 移动端顶部菜单：同一批类，副标题同样去掉、选中态同款淡紫块 */
+.settings-mobile-menu { background: var(--md-surface); }
+.settings-mobile-menu > .settings-nav-item { min-height: 48px; }
+
+/* ------------------------------------------------ 右侧：一整块白色大卡 */
+/* 飞牛的右侧是一整张白色大卡，内部功能块再以浅灰小卡呈现，而不是每个
+   功能块各自浮在灰底上。给滚动容器本身白底 + 描边 + 圆角即可整块统一。 */
+.settings-content {
+  height: auto;
+  align-self: stretch;
+  margin: 16px;
+  background: var(--md-surface-container-lowest);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 14px;
+  box-shadow: var(--md-shadow-1);
+  padding: 0 20px 20px;
+}
+/* 大卡内部的功能块：浅灰底小卡、轻描边，形成卡中卡的层次。
+   overflow:hidden 覆盖原生的 .card.miot-card{overflow:visible}：setting-row 等
+   选项的 hover/选中矩形背景铺满整行且无圆角，会把小卡四角的圆角盖成尖角；
+   裁剪后所有行的变色区域都约束在圆角内，一并修复全部同类选项。 */
+.settings-content .card.miot-card,
+.settings-content .sl-disclosure {
+  background: var(--md-surface-container-low);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 10px;
+  box-shadow: none;
+  overflow: hidden;
+}
+/* 点击反馈：移动端默认 tap-highlight 是直角灰色块，会盖住卡片圆角，
+   统一去掉；折叠面板的按下态改用随主题的浅灰底，被 overflow:hidden
+   裁剪在圆角内，反馈清晰且四角不外溢。 */
+.settings-content * { -webkit-tap-highlight-color: transparent; }
+.settings-content .sl-disclosure > summary:active {
+  background: var(--md-surface-container-high);
+}
+/* ===== 卡片间距彻底统一：间距只由 flex gap:20px 决定，margin 全部清零 =====
+   历史上有三套间距叠加导致忽宽忽窄：SectionCard 28px / 折叠面板 24px /
+   卡片内部 .card 16px，且 port(chat/ai) 容器另有 gap:16px。
+   现在所有卡片 margin 归零，统一交给容器的 flex gap，杜绝叠加与 margin 折叠。 */
+.settings-content { display: flex; flex-direction: column; gap: 20px; }
+/* 关键：flex 列布局下内容超出时默认会压缩子项（flex-shrink:1），
+   折叠面板会被压成只剩上下边框的一条线（看起来像卡片下方多出一条线）。
+   所有卡片禁止收缩，超出交给容器滚动。 */
+.settings-content > * { flex-shrink: 0; }
+.settings-content .settings-header { margin-bottom: 0; }
+/* 容器组件内部也用 flex gap 统一；不用 !important 于 display，避免覆盖 v-show 的 display:none */
+.settings-content .ai-settings,
+.settings-content .chat-settings,
+.settings-content .port-settings { display: flex; flex-direction: column; gap: 20px !important; }
+.settings-content .voice-panel { display: flex; flex-direction: column; gap: 20px; }
+/* 所有卡片与块：margin 归零 */
+.settings-content .miot-section,
+.settings-content .sl-disclosure,
+.settings-content .toolbox-target-card,
+.settings-content .port-settings,
+.settings-content .voice-panel,
+.settings-content .voice-section-nav,
+.settings-content .ai-settings-intro { margin-bottom: 0 !important; }
+.settings-content .miot-section > .card.miot-card { margin-bottom: 0; }
+
+/* ===== 语音「选择要配置的能力」概览卡：对齐统一卡片语言 =====
+   原样式圆角 22px/小选项 16px/图标底 11px，与其他卡片 10px 不一致。 */
+.settings-content .voice-settings-overview {
+  margin-bottom: 0;
+  padding: 16px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 10px;
+  background: var(--md-surface-container-low);
+}
+.settings-content .voice-section-nav-item {
+  border-radius: 10px;
+  background: var(--md-surface-container-lowest);
+}
+.settings-content .voice-section-nav-item.active { background: var(--md-secondary-container); }
+.settings-content .voice-section-nav-icon { border-radius: 8px; }
+
+/* ===== 设备页登录方式：与语音能力卡同一套卡片语言 =====
+   原 .tab-strip 是纯文字 tab + 底部灰线，改成三张等宽浅色小卡，
+   选中态沿用紫罗兰描边 + 淡紫底；去掉旧 tab 的 border-bottom。 */
+.settings-content .auth-method-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 20px 4px;
+  padding: 0;
+  border: 0;
+}
+.settings-content .auth-method-card {
+  min-width: 0;
+  min-height: 66px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 10px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 10px;
+  background: var(--md-surface-container-lowest);
+  color: var(--md-on-surface);
+  text-align: left;
+}
+.settings-content .auth-method-card:hover { background: var(--md-surface-container-high); }
+.settings-content .auth-method-card.active {
+  border-color: var(--md-primary);
+  background: var(--md-secondary-container);
+  color: var(--md-on-secondary-container);
+}
+.settings-content .auth-method-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--md-surface-container-high);
+}
+.settings-content .auth-method-card.active .auth-method-icon {
+  background: var(--md-surface-container-lowest);
+  color: var(--md-primary);
+}
+.settings-content .auth-method-copy { min-width: 0; display: flex; flex-direction: column; }
+.settings-content .auth-method-copy strong,
+.settings-content .auth-method-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-content .auth-method-copy strong { font-size: 14px; }
+.settings-content .auth-name-short { display: none; }
+.settings-content .auth-method-copy small { margin-top: 1px; color: var(--md-on-surface-variant); font-size: 11px; }
+@media (max-width: 599px) {
+  .settings-content .auth-method-nav { margin-right: 14px; margin-left: 14px; gap: 6px; }
+  .settings-content .auth-method-card { min-height: 58px; padding: 8px; gap: 6px; }
+  .settings-content .auth-name-full,
+  .settings-content .auth-method-copy small { display: none; }
+  .settings-content .auth-name-short { display: inline; }
+}
+
+/* ===== 定时任务：新建编辑器与已建任务行对齐统一卡片语言 =====
+   sub-panel 原 12px 圆角、无背景；已建任务是纯分割线行。统一为 10px 圆角浅卡。 */
+.settings-content .sub-panel {
+  border-radius: 10px;
+  background: var(--md-surface-container-low);
+  overflow: hidden;
+}
+.settings-content .schedule-editor > .sub-panel {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+/* 新建任务表单卡与已建任务行（.schedule-task-row）齐宽：
+   两者都在 .form-body 内，任务行占满其内容区；表单卡原来有 .sub-panel
+   默认 20px 左右 margin，会比任务行窄一圈。margin 归零后共用同一条边界。 */
+.settings-content .schedule-editor {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+/* 编辑器内的 setting-row（如「所有受管理设备」「播放前预设音量」）：
+   做成与其它卡片一致的浅底 + 1px 描边 + 10px 圆角的小卡（固定背景也消除手机点按后 hover 浅紫残留）。
+   左右不留额外 margin：输入框、下拉框、星期格已占满 sub-panel 的 12px 内边距内容区，
+   setting-row 也必须从同一条左边界开始，否则会出现「卡片宽、内部小卡窄」的错位。 */
+.settings-content .schedule-editor .setting-row {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 10px;
+  background: var(--md-surface-container-low);
+}
+/* 底部操作栏：去掉负边距外扩与深色底、与 sub-panel 同色浅底内缩留白，
+   不画顶部横线（上方那行已是独立描边小卡，再加横线多余）。 */
+.settings-content .schedule-editor-actions {
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--md-surface-container-low);
+}
+.settings-content .schedule-task-row {
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 10px;
+  background: var(--md-surface-container-low);
+  padding: 10px 14px;
+}
+.settings-content .schedule-task-row + .schedule-task-row { margin-top: 10px; }
+/* 定时任务空状态：去掉默认图标（SlEmptyState 默认 icon=inbox，不传也渲染）、标题改小号 */
+.settings-content .schedule-empty-state .sl-empty-state-icon { display: none; }
+.settings-content .schedule-empty-state strong { font-size: 13px; }
+/* 已保存任务卡：编辑/删除做成紫色圆底图标按钮，直径与开关（.switch 高 32px）严格一致 */
+.settings-content .schedule-task-row > .sl-button.schedule-task-action {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+/* 手机端：文字占满第一行，开关 + 编辑 + 删除整体落到任务卡右下角 */
+@media (max-width: 599px) {
+  .settings-content .schedule-task-row { flex-wrap: wrap; row-gap: 8px; }
+  .settings-content .schedule-task-row > .list-item-copy { flex: 1 1 100%; }
+  .settings-content .schedule-task-row > .switch { margin-left: auto; }
+}
+
+/* 「N 个任务」计数：与「启用定时任务」行标题（.setting-row-title，14px/on-surface）同款，
+   不再用 .field-help 的 12px 灰字。 */
+.settings-content .schedule-task-count {
+  color: var(--md-on-surface);
+  font-size: 14px;
+}
+/* 「播放时长」行的上边缘行距：它紧跟「播放前预设音量」setting-row 小卡。
+   该小卡被上面规则设成 margin:0，导致后面的 field 直接贴住、与其它 field 的 16px 节奏不一致。
+   给它补回 16px 下间距，播放时长标签的上边缘即与别行对齐。 */
+.settings-content .schedule-editor .setting-row.schedule-preset-volume { margin-bottom: 16px; }
+/* 「每天/工作日」「取消/保存任务」两组按钮：
+   桌面 .field-actions 本就 flex-end，手机端基础规则会改成 flex-start，这里覆盖回右对齐。 */
+.settings-content .schedule-editor .schedule-day-actions,
+.settings-content .schedule-editor .schedule-editor-actions { justify-content: flex-end; }
+/* 「每天/工作日」保留 outlined 胶囊边框。 */
+.settings-content .schedule-editor .schedule-day-actions .sl-button {
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-radius-full);
+}
+/* 「取消任务/保存任务」改成 filled 紫底胶囊：显式去掉边框并锁定主色底、反色文字，
+   避免上面 outlined 时代的边框规则残留；两按钮同为 4 字 + 18px 图标，宽度天然一致。 */
+.settings-content .schedule-editor .schedule-editor-actions .sl-button {
+  border: 0;
+  border-radius: var(--md-radius-full);
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+}
+/* 手机端：两个按钮一排、平分宽度、左右贴齐上方卡片的外边缘。
+   按钮组容器本身与上方卡片齐宽，但基础规则有 12px 左右 padding，会让按钮整体内缩一圈，
+   所以窄屏下把左右 padding 归零（上下保留），按钮外边缘即与卡片边缘对齐。 */
+@media (max-width: 599px) {
+  .settings-content .schedule-editor .schedule-editor-actions {
+    justify-content: space-between;
+    gap: 12px;
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .settings-content .schedule-editor .schedule-editor-actions .sl-button {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+  }
+}
+
+/* 新建/编辑分组面板：与上方「新建分组」按钮同宽。
+   .sub-panel 默认左右 20px margin 叠加 form-body 的 20px padding，
+   实测面板 776px vs 按钮 816px；归零后共用同一条边界。 */
+.settings-content .group-editor {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+
+/* ===== DLNA 接收器行：与上方标准 SettingRow 同宽、同分割线 =====
+   接收器行嵌在 .form-body 内，被其左右 padding（桌面 20px / 窄屏 14px）
+   推窄一圈，看起来比上面的设置行缩进。负 margin 抵消后共用同一条边界，
+   并补上与上方设置行一致的发丝分割线；行内说明文字保持相同内边距。 */
+.settings-content .form-body > .receiver-status {
+  margin-left: -20px !important;
+  margin-right: -20px !important;
+}
+/* 接收器行是 form-body 第一个子元素时，抵消 form-body 的 16px 顶内边距，
+   让它和上方「服务器局域网地址」行紧贴（同样只隔一条发丝线），
+   否则视觉上会多出一段空档，看起来像行高不一致。 */
+.settings-content .form-body > .receiver-status:first-child { margin-top: -16px; }
+/* 下方按钮与分割线保持间距，不再贴线重合。 */
+.settings-content .receiver-save-row { margin-top: 12px; }
+.settings-content .receiver-status .setting-row {
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+.settings-content .receiver-status > p {
+  margin: 0;
+  padding: 8px 18px;
+}
+@media (max-width: 599px) {
+  .settings-content .form-body > .receiver-status {
+    margin-left: -14px !important;
+    margin-right: -14px !important;
+  }
+  .settings-content .receiver-status > p { padding-left: 14px; padding-right: 14px; }
+}
+
+/* 标题并入卡片：标题区现在是浅灰卡内部的卡头，补内边距，并用一条发丝线与内容分隔。
+   与 setting-row 的边框同色，确保卡头分割线与行分割线对齐成一套。 */
+.settings-content .miot-section .section-heading {
+  padding: 14px 18px 12px;
+  min-height: 0;
+  background: var(--md-surface-container);
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+/* flat 卡（无 surface）：标题仍留在卡内，但不画分割线，避免空卡多一条线 */
+.settings-content .miot-section .miot-card-flat .section-heading {
+  padding: 0;
+  background: transparent;
+  border-bottom: 0;
+}
+/* 区块标题：品牌色小图标 + 深色标题 */
+.section-heading-icon {
+  border-radius: 8px;
+  background: var(--md-primary-container);
+  color: var(--md-primary);
+}
+.miot-section .section-title {
+  color: var(--md-on-surface);
+  font-size: 15px;
+  font-weight: 500;
+  padding-left: 0;
+}
+.setting-row-leading {
+  border-radius: 8px;
+  background: var(--md-primary-container);
+  color: var(--md-primary);
+}
+.miot-section-warning .section-heading-icon,
+.miot-section-danger .section-heading-icon {
+  background: var(--md-error-container);
+  color: var(--md-error);
+}
+/* 窄屏：右侧大卡铺满、去掉外边距，还原原生的安全区内边距 */
+@media (max-width: 599px) {
+  .settings-content {
+    height: 100%;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 24px 12px calc(28px + var(--sl-safe-bottom, 0px));
+  }
+  /* 卡头内边距与窄屏 setting-row 的 14px 对齐 */
+  .settings-content .miot-section .section-heading { padding: 14px 14px 12px; }
+  .settings-content .miot-section .miot-card-flat .section-heading { padding: 0; }
+}
+/* 标题区：高度与左侧 home 行一致（56px），竖条标题 + 下分割线两卡对齐 */
+.settings-header {
+  height: 56px;
+  min-height: 56px;
+  padding: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+.settings-header-copy { flex: 1; min-width: 0; }
+.settings-header-eyebrow,
+.settings-header-copy p { display: none; }
+.settings-header h1 {
+  position: relative;
+  flex: 1;
+  font-size: 16px;
+  font-weight: 500;
+  padding-left: 12px;
+}
+.settings-header h1::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--md-primary);
+  transform: translateY(-50%);
+}
+
+/* --------------------------------------------- 主页面：平铺布局，不套卡片背景 */
+/* 曾给 .player-toolbar / .song-list / 空状态加白底 + 描边 + 12px 圆角，形成
+   两张大圆角矩形卡（截图里工具行和列表各一张）。现按要求移除：主页面回到
+   style.css 的平铺样式，只保留 .miot-page 自身的页面留白与表头/高亮行样式。
+   虚拟列表高度仍由 measureListHeight 实测 .sl-list-view 的 top，不受影响。 */
+
+/* --------------------------------------------------------- 目标卡片（工具箱） */
+.toolbox-target-card {
+  background: var(--md-primary-container);
+  border: 1px solid transparent;
+  border-radius: 10px;
+  box-shadow: none;
+  color: var(--md-on-primary-container);
+}
+/* 目标设备名（「智能音箱 · OH2P」）与章节标题（如「URL 播放」）字体一致：
+   15px / 400 / 22px 行高 / on-surface，覆盖 redesign.css 里的 17px。 */
+.settings-content .toolbox-target-card strong {
+  color: var(--md-on-surface);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 22px;
+}
+/* 版本号：调试与诊断卡片下方（卡片外），右对齐 */
+.toolbox-version {
+  margin-top: -8px;
+  text-align: right;
+  color: var(--md-on-surface-variant);
+  font-size: 12px;
+  opacity: .8;
+}
+
+/* ===== 工具箱：操作结果空状态 + 导出日志按钮排版 =====
+   1) 空状态去掉图标、标题字号缩小、整块高度减半（原 compact min-height:150px → 75px）；
+   2) 「清空记录」放到区域右下角；
+   3) 导出日志文案在前、按钮在后，手机端按钮右对齐（覆盖基础规则的 flex-start）。 */
+.settings-content .toolbox-empty-state {
+  min-height: 75px;
+  padding: 14px 20px;
+}
+.settings-content .toolbox-empty-state .sl-empty-state-icon { display: none; }
+.settings-content .toolbox-empty-state strong { font-size: 13px; }
+/* 「清空记录」居中；「导出日志」仍靠右（导出文案在同一行左侧，靠行布局控制）。 */
+.settings-content .toolbox-log-actions { justify-content: center; }
+.settings-content .toolbox-export-actions { justify-content: flex-end; }
+
+/* ===== 调试与诊断：全局调试日志行的封口与高度 =====
+   该行是 form-body 直接子元素，被左右 padding 顶窄、上下 padding 推开：
+   - 横向负 margin 让下边线接到卡片边缘（两端封口），与卡头分割线对齐；
+   - 首行纵向负 margin-top 抵消 form-body 的 16px 上内边距，
+     消除 hover 时上方露出的一条卡片底色（看起来「上边缘多出一截浅色层、行高不对」）。
+   与 AI 设置区同类通解一致；手机端 form-body 左右 padding 收到 14px。 */
+.settings-content .toolbox-debug-card .form-body > .setting-row {
+  margin-left: -20px;
+  margin-right: -20px;
+}
+.settings-content .toolbox-debug-card .form-body > .setting-row:first-child {
+  margin-top: -16px;
+}
+@media (max-width: 599px) {
+  .settings-content .toolbox-debug-card .form-body > .setting-row {
+    margin-left: -14px;
+    margin-right: -14px;
+  }
+}
+
+/* ===== 导出日志：文案与按钮同一行、垂直居中 =====
+   文案字号从 field-help 的 12px 提到 14px、颜色改 on-surface，与「全局调试日志」标题同款；
+   文案占满剩余宽度、按钮固定在右端，手机端按钮自然右对齐。 */
+.settings-content .toolbox-export-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+.settings-content .toolbox-export-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: var(--md-on-surface);
+  font-size: 14px;
+}
+.settings-content .toolbox-export-actions { margin-top: 0; }
+
+/* 说明文字在前、按钮在后时（扫码登录），给文字补下边距，避免贴近按钮 */
+.form-body .field-help + .sl-button { margin-top: 10px; }
+
+/* -------------------------------------------------------------- 状态与标签 */
+.sl-status-chip {
+  min-height: 24px;
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  font-weight: 500;
+}
+.sl-status-chip-success { color: var(--md-success); background: transparent; }
+.sl-status-chip-warning { color: var(--md-warning); background: transparent; }
+.sl-status-chip-error { color: var(--md-error); background: transparent; }
+.sl-status-chip-info { color: var(--md-primary); background: transparent; }
+.chip-success { background: var(--md-success-container); color: var(--md-success); }
+
+/* AI 连接状态行：状态 chip 靠左（浅绿胶囊）、检测按钮靠右（浅紫胶囊、底色常驻）。
+   两端对齐用 space-between + nowrap；状态文案过长时 chip 省略，避免挤爆按钮。 */
+.settings-content .connection-status-row {
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+/* 状态 chip（已连接/连接失败）由方角改胶囊形，保留 chip-success 的浅绿底。 */
+.settings-content .connection-status-row .chip {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: var(--md-radius-full);
+}
+/* 检测按钮：text 变体去掉边框，浅紫胶囊底 + 紫字常驻（含未 hover / disabled），
+   高度与 chip 一致、字号一致。 */
+.settings-content .connection-status-row .connection-check-btn.sl-button {
+  min-height: 28px;
+  height: 28px;
+  flex: 0 0 auto;
+  padding: 0 12px;
+  border: 0 !important;
+  border-radius: var(--md-radius-full);
+  background: var(--md-primary-container) !important;
+  color: var(--md-primary) !important;
+  font-size: 12px;
+}
+.settings-content .connection-status-row .connection-check-btn.sl-button .sl-button-content { gap: 4px; }
+/* 浅紫底在 hover/按下时不受全局按钮阴影与 primary-container hover 覆盖影响。 */
+.settings-content .connection-status-row .connection-check-btn.sl-button:hover:not(:disabled),
+.settings-content .connection-status-row .connection-check-btn.sl-button:active:not(:disabled) {
+  background: var(--md-primary-container) !important;
+}
+
+/* ===== AI 口令分析卡片：三处标题字号统一 14px、左对齐 =====
+   「启用 AI 分析」(.setting-row-title 14px)、「口令分析超时」(.field-label 12px)、
+   「AI 分析测试」(.command-test-panel > strong 13px) 字号本不一致，这里统一到 14px
+   并显式左对齐；三者左边缘已由容器 padding 对齐（桌面 20 / 手机 14px）。 */
+.settings-content .ai-analysis-card .setting-row-title,
+.settings-content .ai-analysis-card .field-label,
+.settings-content .ai-analysis-card .command-test-panel > strong {
+  font-size: 14px;
+  text-align: left;
+}
+
+/* ------------------------------------------------------------------ 表单控件 */
+.form-body .sl-input,
+.sl-disclosure .sl-input {
+  border-radius: 8px;
+  background: var(--md-surface-container-lowest);
+}
+.form-body .sl-button-filled,
+.sl-disclosure .sl-button-filled { border-radius: 8px; }
+
+/* 「播放恢复」卡片：清除播放失败标记按钮做成紫色底圆形图标按钮，
+   放在「整点报时后续播」开关右侧。直径与开关高度一致（.switch 高 32px）；
+   基础 .sl-button 有 min-height:40px，必须一并覆盖，否则会被撑成竖椭圆。
+   触屏规则会用 !important 清掉 hover 背景，这里同样用 !important 锁定品牌色。 */
+.settings-content .clear-failures-btn.sl-button-icon {
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  flex: 0 0 32px;
+  margin-left: 12px;
+  border-radius: 50%;
+  background: var(--md-primary) !important;
+  color: var(--md-on-primary) !important;
+}
+.settings-content .clear-failures-btn.sl-button-icon:hover:not(:disabled),
+.settings-content .clear-failures-btn.sl-button-icon:active:not(:disabled) {
+  background: var(--md-primary) !important;
+  color: var(--md-on-primary) !important;
+}
+.list-item { border-bottom-color: var(--md-outline-variant); }
+
+/* ------------------------------------------------------------------ 空状态 */
+.sl-empty-state-icon {
+  border-radius: 14px;
+  background: var(--md-primary-container);
+  color: var(--md-primary);
+}
+
+/* ------------------------------------------- 手机端：底部标签栏（fnOS 风格） */
+/* 手机端把设置分类从纵向列表改为常驻底部标签栏（图标 + 文字横排），
+   与 fnmusic-ext 管理台一致：点标签直接切换内容，不再有「分类首页」层级。
+   仅在窄屏（<600px）生效，宽屏沿用左侧导航卡。 */
+@media (max-width: 599px) {
+  .settings-bottom-tabs {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    z-index: 120;
+    display: flex;
+    align-items: stretch;
+    height: calc(62px + var(--sl-safe-bottom, 0px));
+    padding: 4px 2px calc(4px + var(--sl-safe-bottom, 0px));
+    background: var(--md-surface-container-lowest);
+    border-top: 1px solid var(--md-outline-variant);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, .06);
+  }
+  /* 底栏上移后下方露出的 20px 空隙补成与底栏同色，避免露出错位的页面底色 */
+  .settings-bottom-tabs::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 22px;
+    background: var(--md-surface-container-lowest);
+  }
+  .settings-bottom-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 4px 0;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--md-on-surface-variant);
+    cursor: pointer;
+  }
+  .settings-bottom-tab-icon {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    background: transparent;
+    color: inherit;
+  }
+  .settings-bottom-tab-icon .sl-icon { color: inherit; }
+  .settings-bottom-tab-label {
+    font-size: 11px;
+    line-height: 14px;
+    white-space: nowrap;
+  }
+  .settings-bottom-tab.active { color: var(--md-primary); }
+  .settings-bottom-tab.active .settings-bottom-tab-icon { color: var(--md-primary); }
+  .settings-bottom-tab.active .settings-bottom-tab-label { font-weight: 600; }
+  /* 返回标签：与其他标签等分，用箭头图标 + 文字 */
+  /* 内容区给底部标签栏留位，避免最后一项被遮挡（底栏上移 20px） */
+  .settings-page { padding-bottom: calc(82px + var(--sl-safe-bottom, 0px)); }
+  /* 手机端：删掉顶部标题栏与返回按钮，返回入口已移到下方标签栏；
+     同时把 appbar 预留的顶部空间还给内容 */
+  .settings-appbar-shell { display: none; }
+  .settings-page { padding-top: var(--sl-safe-top, 0px); }
+}
+
+/* 图标与文字并排时统一上下居中：字形在图标盒内居中，图标盒与同行文字按中线对齐。 */
+.sl-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+.settings-content .auth-method-card,
+.settings-content .voice-section-nav-item,
+.settings-content .dependency-hint,
+.settings-content .section-heading,
+.settings-content .sl-disclosure > summary {
+  align-items: center;
+}
+
+/* ===== 对话监听：轮询间隔独占一行；状态、刷新、最近记录同属一个区块 =====
+   状态 chips、刷新按钮、展开行和展开列表全部放进 .conversation-status-card，
+   去掉独立灰底，改用上下发丝线与卡片内其它分区保持一致。
+   .sub-panel 默认 20px 左右 margin 会让它比外层窄一截，归零与展开行齐宽。
+   调试日志开关已移除，统一由工具箱「全局调试日志」控制，故删去第二字段右推/开关微调规则。 */
+.settings-content .conversation-inline-fields {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.settings-content .conversation-inline-field {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  /* 去掉基础 .field 的 16px 下边距，避免与状态卡 12px 上边距叠加把本排撑高 */
+  margin-bottom: 0;
+}
+/* 轮询间隔独占一行：标签字号/颜色与上方「启用对话监听」标题一致（14px/20px、正文色）；
+   字段占满整行，输入框用 margin-left:auto 推到行尾右对齐。 */
+.settings-content .conversation-inline-field:first-child {
+  flex: 1 1 auto;
+}
+.settings-content .conversation-inline-field .field-label {
+  margin-bottom: 0;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--md-on-surface);
+}
+.settings-content .conversation-inline-field .sl-input {
+  flex: 0 0 96px;
+  width: 96px;
+  min-width: 0;
+  margin-left: auto;
+}
+@media (max-width: 700px) {
+  .settings-content .conversation-inline-fields { flex-wrap: nowrap; gap: 8px; }
+  .settings-content .conversation-inline-field { gap: 6px; }
+  .settings-content .conversation-inline-field:first-child { flex: 1 1 auto; }
+  .settings-content .conversation-inline-field .sl-input { flex: 0 0 64px; width: 64px; margin-left: auto; }
+}
+/* 对话监听标题后的两个状态小圆点：绿=正常，蓝=轮询回落中，黄=无受管理设备；悬浮 title 保留完整文字含义。 */
+.settings-content .conversation-status-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-content .conversation-status-dots .status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+.settings-content .conversation-status-dots .status-dot.is-ok {
+  background: var(--md-success);
+}
+.settings-content .conversation-status-dots .status-dot.is-warn {
+  background: var(--md-warning);
+}
+/* 轮询回落中：蓝色信息点（原 is-warn 棕色），随明暗主题自动切换 */
+.settings-content .conversation-status-dots .status-dot.is-info {
+  background: var(--md-info);
+}
+.settings-content .conversation-status-card {
+  margin: 0 -20px;
+  /* 上下边框 2px + 上下各 12px + 42px 输入框同款按钮行 = 68px，与上方两排等高 */
+  padding: 12px 20px;
+  border-top: 1px solid var(--md-outline-variant);
+  border-bottom: 1px solid var(--md-outline-variant);
+}
+/* 轮询间隔行：由字段容器自身撑到 68px 并垂直居中，三排统一行高。 */
+.settings-content .form-body.conversation-status-body { padding-top: 0; padding-bottom: 0; }
+.settings-content .conversation-inline-fields { min-height: 68px; }
+.settings-content .form-body.conversation-status-body + .form-body { padding-top: 8px; }
+@media (max-width: 599px) {
+  .settings-content .conversation-status-card { margin-left: -16px; margin-right: -16px; padding-left: 16px; padding-right: 16px; }
+}
+.settings-content .conversation-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-content .conversation-status-row .field-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+}
+/* 展开/收起最近对话记录：左对齐，字体重置为与上一排「轮询间隔（秒）」一致
+   （14px/20px、正文色、不加粗），不再用紫色主题链接样式。 */
+.settings-content .conversation-status-card .conversation-history-toggle {
+  flex: 0 0 auto;
+  width: auto;
+  min-height: 0;
+  gap: 4px;
+  margin-top: 0;
+  justify-content: flex-start;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  color: var(--md-on-surface);
+}
+.settings-content .conversation-status-card > .sub-panel {
+  margin-top: 12px;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+/* ===== 手机端状态区对齐（必须放在基础规则之后，否则同优先级会被覆盖） =====
+   状态圆点已移到标题后；本排展开/收起最近对话记录靠左、刷新按钮靠右。 */
+@media (max-width: 700px) {
+  .settings-content .conversation-status-row { flex-wrap: wrap; justify-content: space-between; }
+  .settings-content .conversation-status-row .field-actions {
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+  .settings-content .conversation-status-card .conversation-history-toggle { margin-left: 0; }
+}
+/* ===== 语音记忆展开卡：与上方「展开语音记忆」行左右齐宽，但不贴外框 =====
+   .sub-panel 默认在 form-body 内左右各再留 20px（窄屏 16px），
+   比同一 form-body 里的展开行窄一圈；只归零自身 margin，
+   让它停在 form-body 内容区边界（距外卡仍有 20px/16px），不与外框重合。 */
+.settings-content .memory-list {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+/* ===== AI 设置：form-body 直接子 setting-row 分割线接卡片左右边缘（封口） =====
+   这些 setting-row 是 .form-body 的直接子元素，被其左右 padding（桌面 20px /
+   窄屏 14px）推窄一圈，行间 border-bottom 两端各缩进一段，与卡片标题分割线、
+   卡片下直接子 setting-row 不对齐。负 margin 抵消 form-body 的 padding，让分割线接边；
+   行内文字与开关因 setting-row 自身 padding 仍有内缩，不会贴边。
+   必须用直接子选择器 `>`：SlDisclosure「高级设置」内部也嵌着 setting-row，
+   但它自身是独立的 1px 边框小卡，内部行应相对 disclosure 边框对齐；若一并负 margin，
+   内部行会冲出 disclosure 边框、与外层大卡边框重合。
+   仅作用于 AI 设置（AIModelSettings / ChatSettings），不影响其它分类。 */
+.settings-content .ai-settings .form-body > .setting-row {
+  margin-left: -20px;
+  margin-right: -20px;
+}
+@media (max-width: 599px) {
+  .settings-content .ai-settings .form-body > .setting-row {
+    margin-left: -14px;
+    margin-right: -14px;
+  }
+}
+/* AI 对话：「必须说触发词」上方是「触发词」输入框（非 setting-row、无下分割线），
+   故这一行上边缘缺线，与其余相邻开关行之间的 border-bottom 规则不一致。
+   给它补一条顶部封口线；因该行已是负 margin 撑满 form-body padding，border-top
+   自然接卡片左右边缘，与其余行间分割线对齐（桌面/手机一致）。 */
+.settings-content .ai-settings .form-body > .setting-row.chat-divider-top {
+  border-top: 1px solid var(--md-outline-variant);
+}
+/* ===== AI 设置区：form-body 首尾 setting-row 的纵向色带通解 =====
+   .form-body 有 16px 上下内边距。上面这些 setting-row 已用横向负 margin 铺满
+   卡片宽度，但纵向仍被 form-body 的 padding 推开：首行上方、末行下方会露出
+   一条 16px 卡片底色（--md-surface-container-low），hover 时与 setting-row
+   的 --md-surface-container 背景形成色差带，看起来像这一行顶部/底部多出一截、
+   行高与其它行不一致（「携带历史对话」「启用 AI 对话」等首行均如此）。
+   统一用纵向负 margin 抵消这 16px，让首尾行背景铺到卡片内容区边缘；卡片
+   .card.miot-card 是 border-radius + overflow:hidden，背景被裁进圆角无外溢。
+   与本项目 .receiver-status:first-child 的既有做法一致，一次性覆盖所有
+   ai-settings 卡片，不再逐卡打 padding 补丁。手机端 form-body 上下 padding
+   同为 16px（媒体查询只改左右），故全端通用。 */
+.settings-content .ai-settings .form-body > .setting-row:first-child {
+  margin-top: -16px;
+}
+.settings-content .ai-settings .form-body > .setting-row:last-child {
+  margin-bottom: -16px;
+}
+
+/* ===== AI 设置：高级设置小卡的顶边留白 + 内部字段缩进与两列并排 =====
+   1) 顶边：disclosure 上方若是 SettingRow，其 border-bottom 会和 disclosure 的
+      border-top 贴在同一条 Y 上、看似重叠。加 margin-top 让两条线分开留白。
+   2) 字段缩进：.sl-disclosure-content 无左右 padding，里面的 .chat-field 标签与
+      输入框从 disclosure 边框 1px 处开始，输入框边框贴着小卡圆角外框、像两条线
+      重合；同层 SettingRow 自带 18px padding 文字是缩进的。补上相同的左右 padding
+      （桌面 18px / 窄屏 14px），输入框即与行标题对齐、与小卡边框留出空隙。
+   3) 两列：历史保留天数/最大轮数包在 .history-fields-row 里并排。基础 .field-grid
+      窄屏会把子项撑成 100% 换行，这里固定 flex-basis 强制两列不换行；padding 加在
+      row 上、子字段 padding 归零，避免双重缩进。 */
+.settings-content .ai-settings .sl-disclosure {
+  margin-top: 12px;
+}
+.settings-content .ai-settings .sl-disclosure-content > .chat-field {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+.settings-content .ai-settings .sl-disclosure-content > .history-fields-row {
+  padding-left: 18px;
+  padding-right: 18px;
+  flex-wrap: nowrap;
+  gap: 0 12px;
+}
+.settings-content .ai-settings .history-fields-row > .chat-field {
+  flex: 0 0 calc((100% - 12px) / 2);
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+@media (max-width: 599px) {
+  .settings-content .ai-settings .sl-disclosure-content > .chat-field {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .settings-content .ai-settings .sl-disclosure-content > .history-fields-row {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}
+/* 「历史保留天数/最大轮数」已从「高级设置」移出到 form-body，不再匹配上面的
+   .sl-disclosure-content > .history-fields-row 规则（原提供 nowrap + gap:12px）。
+   若不补回，基础 .field-grid 的 gap:16px + 子项 calc((100%-12px)/2) 总宽超过 100%
+   会在窄屏换行。左对齐参照同为 form-body 直接子项的「参考最近几轮」输入框，
+   二者天然对齐，无需额外 padding。 */
+.settings-content .ai-settings .form-body > .history-fields-row {
+  flex-wrap: nowrap;
+  gap: 0 12px;
+}
+/* 「常用城市 / 追问窗口」与 history-fields-row 同构：两列等宽、不换行、手机端一致。 */
+.settings-content .ai-settings .form-body > .city-followup-row {
+  flex-wrap: nowrap;
+  gap: 0 12px;
+}
+.settings-content .ai-settings .city-followup-row > .chat-field {
+  flex: 0 0 calc((100% - 12px) / 2);
+  min-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* ===== 分组编辑器：手机端「取消 / 保存」保持右下角右对齐 =====
+   基础样式在窄屏把 .field-actions 统一改成 flex-start，这里只把分组编辑器改回 flex-end。 */
+@media (max-width: 599px) {
+  .settings-content .group-editor .field-actions {
+    justify-content: flex-end;
+  }
+}
+
+/* ===== 高级设备兼容：「已知可支持的型号」标签统一宽度、压低高度 =====
+   原先用裸 .chip 内联在 <p> 里，标签宽度随文字长短变化，且 chip 的 28px 最小高度
+   大于段落行高，两排标签的上下边缘几乎贴在一起。改成 flex 换行容器 + 明确行距，
+   标签固定 48px 宽 / 22px 高，文字居中。 */
+.settings-content .model-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.settings-content .model-chip-list .model-chip-label { white-space: nowrap; }
+.settings-content .model-chip-list .model-chip {
+  flex: 0 0 48px;
+  width: 48px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  justify-content: center;
+  line-height: 22px;
+  margin-left: 0;
+}
+
+/* ===== 设置页字重：所有文字一律常规，不加粗 =====
+   基础样式里 strong、各类标题、状态 chip、按钮、字段标签等自带 500/600 字重；
+   这里把设置页内所有文字（含区块标题、行标题、列表项标题、导航标题）统一降到 400，
+   层级只靠字号与颜色区分。 */
+.settings-page strong,
+.settings-page b,
+.settings-page .appbar-title,
+.settings-page .settings-header h1,
+.settings-page .settings-nav-item .settings-nav-title,
+.settings-page .settings-bottom-tab.active .settings-bottom-tab-label,
+.settings-page .sl-disclosure > summary strong,
+.settings-page .miot-section .section-title,
+.settings-page .setting-row-title,
+.settings-page .card-title,
+.settings-page .dialog-title,
+.settings-page .list-item-title,
+.settings-page .sl-empty-state strong,
+.settings-page .voice-settings-heading > strong,
+.settings-page .voice-section-nav-item strong,
+.settings-page .command-test-panel > strong,
+.settings-page .chat-live-answer > strong,
+.settings-page .sl-button,
+.settings-page .sl-status-chip,
+.settings-page .field-label,
+.settings-page .chip,
+.settings-page .settings-nav-home,
+.settings-page .tab-strip button.active,
+.settings-page .command-keyword,
+.settings-page .device-picker-account h3,
+.settings-page .voice-command-header > strong {
+  font-weight: 400 !important;
+}
+
+/* ===== 歌曲索引：状态 chips 独占一行；刷新按钮移到「最大索引歌曲数」输入框下方 ===== */
+/* 三个状态 chip 字号与「刷新」按钮一致（14px），不再用 chip 默认的 12px。 */
+.settings-content .index-status-row .status-chips .chip {
+  font-size: 14px;
+}
+/* 刷新按钮与「最大索引歌曲数」输入框同排：输入框占满剩余宽度，按钮固定宽右对齐，不换行。
+   手机端基础规则会把 .field-actions 改成 flex-start，这里覆盖回右对齐。 */
+.settings-content .index-refresh-field .index-refresh-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+.settings-content .index-refresh-field .index-refresh-row .sl-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.settings-content .index-refresh-field .index-refresh-row .field-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+/* ===== 语音记忆：「记忆上限」输入框与「刷新 / 清空」按钮同排 =====
+   两个按钮复用 .input-style-btn（与输入框同款的圆角矩形：白底灰框 8px 圆角 42px 高），
+   输入框占满剩余宽度，按钮固定宽右对齐、不换行；手机端同样。
+   标签上下行距收紧，避免删掉说明后留白过大。 */
+.settings-content .memory-limit-field .field-label {
+  margin-bottom: 8px;
+}
+.settings-content .memory-limit-field .memory-limit-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 12px;
+}
+.settings-content .memory-limit-field .memory-limit-row .sl-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+}
+.settings-content .memory-limit-field .memory-limit-row .field-actions {
+  flex: 0 0 auto;
+  margin-top: 0;
+  justify-content: flex-end;
+}
+
+/* ===== 刷新按钮做成与输入框同款：白底、1px 灰边框、8px 圆角、42px 高、正文色 =====
+   基于 tonal variant（已被触屏 hover 清背景规则排除，手机点完背景不消失），
+   这里把它从「通栏两端对齐」改写为自适应宽度的紧凑按钮。 */
+.settings-content .input-style-btn.sl-button {
+  width: 96px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 12px;
+  justify-content: center;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-radius-sm);
+  background: var(--md-surface-container-lowest);
+  color: var(--md-on-surface);
+  font-weight: 400;
+}
+
+/* 手机端刷新按钮宽度跟随轮询输入框（同为 64px），并收窄内边距与图文间距以适配。 */
+@media (max-width: 700px) {
+  .settings-content .input-style-btn.sl-button {
+    width: 64px;
+    padding: 0 6px;
+  }
+  .settings-content .input-style-btn.sl-button .sl-button-content { gap: 2px; }
+}
+
+/* ===== 口令测试：输入框与「测试」按钮同排，强制不换行（桌面+手机） =====
+   按钮复用 .input-style-btn 的输入框同款外观（白底灰框圆角 42px）。 */
+.settings-content .command-test-fields { flex-wrap: nowrap; }
+.settings-content .command-test-fields > .sl-input { flex: 1 1 auto; min-width: 0; }
+.settings-content .command-test-fields > .sl-button { flex: 0 0 auto; }
+/* 口令测试输入框不在 .form-body 内，底色用基础 --md-surface（略带紫灰），
+   这里让「测试」按钮跟随同款底色（只覆盖本按钮，不动全局 .input-style-btn）。 */
+.settings-content .input-style-btn.command-test-btn { background: var(--md-surface); }
+
+/* ===== 口令测试面板：去掉灰底，左右与上方表单内容齐宽 =====
+   清零面板自身左右 padding，让输入框/按钮/标题与面板左右边界重合；
+   面板 margin 跟随 form-body 同侧 padding：桌面 20px、中屏 16px、
+   超窄屏（<=599px，redesign.css 把 form-body padding 收到 14px）14px，
+   从而与上方 form-body 内容左右精确对齐。上下 14px padding 保留垂直间距。 */
+.settings-content .command-test-panel {
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+  border-radius: 0;
+  position: relative;
+}
+/* 口令测试上方分割线：用伪元素向左右各延伸一个 margin 的宽度，顶到卡片内边缘
+   （桌面 20px / 中屏 16px / 手机 14px），与上方设置行的分割线左右封口对齐；
+   绝对定位不占布局空间，面板内容与表单内容的左右对齐不受影响。 */
+.settings-content .command-test-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -20px;
+  right: -20px;
+  border-top: 1px solid var(--md-outline-variant);
+  pointer-events: none;
+}
+@media (max-width: 700px) {
+  .settings-content .command-test-panel::before { left: -16px; right: -16px; }
+}
+@media (max-width: 599px) {
+  .settings-content .command-test-panel { margin-left: 14px; margin-right: 14px; }
+  .settings-content .command-test-panel::before { left: -14px; right: -14px; }
+}
+/* AI 分析测试面板带 .command-test-panel-inset、位于 .form-body 内：form-body 自身
+   已提供左右 padding（桌面20/中屏16/手机14），面板不应再加 margin。上面 ≤599 的
+   .settings-content .command-test-panel{margin:14px} 特异性(0,2,0)高于 inset(0,1,0)，
+   误伤 inset 面板，使手机端比上方「口令分析超时」多缩进14px、分割线也差14px没顶到
+   卡片内边缘。这里用 (0,3,0) 覆盖回 0：面板与上方内容左右对齐，::before 的延伸量
+   正好到卡片内边缘，分割线封口。不影响 VoiceSettings 的非 inset 口令测试面板。 */
+.settings-content .command-test-panel.command-test-panel-inset {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+/* ===== 恢复默认按钮：紫色底 + 左右拉满；去掉它上方（最后一组口令）的分割线 =====
+   最后一组口令的下边框本应被 :last-of-type 去掉，但 .field-actions 同为 div
+   且排在后面，导致 :last-of-type 失效、那条线一直显示。这里按「紧邻 field-actions
+   的最后一个 group」精确去掉下边框；同时让 filled 按钮在 field-actions 内撑满整行。 */
+.settings-content .voice-command-list > .voice-command-group:nth-last-child(2) {
+  border-bottom: 0;
+}
+.settings-content .voice-command-list > .voice-command-group:has(+ .field-actions) {
+  border-bottom: 0;
+}
+.settings-content .voice-command-list > .field-actions {
+  width: 100%;
+}
+.settings-content .voice-command-list > .field-actions > .sl-button-filled {
+  width: 100%;
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+/* ===== 折叠摘要行：延迟提示语取代原「N 条语音口令」chip =====
+   图标 + 文字横排，沿用次要色与提示语字号，窄屏可换行不溢出。 */
+.settings-content .collapsed-summary .collapsed-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--md-on-surface-variant);
+  font-size: 13px;
+  line-height: 18px;
+}
+.settings-content .collapsed-summary .collapsed-hint > span { min-width: 0; overflow-wrap: anywhere; }
+
+/* ===== 下拉面板搜索框：白底铺满搜索行、左右与面板两边缘齐平 =====
+   面板搜索 input 本应在 style.css 里 background:transparent、无边框圆角，
+   但 .form-body .sl-input（本文件上方）与其特异性相同、后加载胜出，给 input
+   加了 var(--md-surface-container-lowest) 白底 + 8px 圆角 + 左右 12px 内边距，
+   在搜索行内形成一个缩进的小白块、两边露出面板底色。
+   这里让搜索行本身常驻白底并铺满整行宽度，input 恢复透明无内边距：
+   白底左右自然顶到面板两边缘、与选项列表背景层齐平（面板 overflow:hidden
+   会按面板圆角裁切）。 */
+.sl-select-panel-search {
+  background: var(--md-surface-container-lowest) !important;
+}
+.form-body .sl-select-panel-search .sl-input,
+.sl-disclosure .sl-select-panel-search .sl-input,
+.sl-select-panel-search .sl-input {
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+/* 点击搜索框时不要紫色描边/紫色下边线：redesign.css 的 :focus-within 会给整行
+   画 inset 主色框并把下边线染紫，这里覆盖回未聚焦时的白底 + 灰色分隔线。 */
+.sl-select-panel-search:focus-within {
+  border-bottom-color: var(--md-outline-variant) !important;
+  box-shadow: none !important;
+}
+
+/* ===== 问答模型：获取模型按钮移到输入框同行，做成输入框同款白底灰框圆角 =====
+   获取模型后输入框原地变成下拉（点框即弹列表），不再另起一行；
+   下方兼容模式/手输场景保留 SlInput，两者同高、按钮不换行不溢出。 */
+.settings-content .chat-model-row { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; min-width: 0; }
+.settings-content .chat-model-row > .sl-input,
+.settings-content .chat-model-row > .sl-select { flex: 1 1 auto; min-width: 0; }
+/* 原生 .sl-select 高 40，输入框 42：拉齐同行高度。 */
+.settings-content .chat-model-row > .sl-select { height: 42px; }
+/* 按钮在原有 .input-style-btn（96px/64px 固定宽）基础上改为自适应：
+   「获取模型」四字比「刷新」「测试」宽，固定宽在手机上会挤掉输入框。 */
+.settings-content .chat-model-row .chat-model-fetch-btn.sl-button {
+  width: auto;
+  min-width: 88px;
+  padding: 0 12px;
+}
+
+/* ===== 联网搜索与测试：两个测试按钮做成输入框同款圆角矩形、等宽铺满对齐 =====
+   复用 tonal variant（不受触屏 hover 清背景影响），改写为白底灰框 8px 圆角 42px 高。
+   两按钮各占一半（flex:1 1 0），gap 用父级 chat-actions 的 8px，左右边缘与上方输入框对齐。
+   手机端同样不换行、等宽。 */
+.settings-content .chat-test-actions { flex-wrap: nowrap; }
+.settings-content .chat-test-actions .chat-test-btn.sl-button {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 12px;
+  justify-content: center;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-radius-sm);
+  background: var(--md-surface-container-lowest);
+  color: var(--md-on-surface);
+  font-weight: 400;
+}
+.settings-content .chat-test-actions .chat-test-btn.sl-button .sl-button-content { gap: 4px; }
+
+/* ===== 对话测试：提问/停止/退出/重置 四按钮同排等宽、胶囊形状 =====
+   这组 .chat-actions 单独加 chat-dialog-actions，避免影响聊天历史的分页按钮。
+   四按钮 flex:1 1 0 等宽铺满、nowrap 手机端不换行；按钮高度 42px 与问题输入框对齐。
+   圆角用 --md-radius-full 呈胶囊形（与基础 .sl-button 一致）。 */
+.settings-content .chat-dialog-actions { flex-wrap: nowrap; }
+.settings-content .chat-dialog-actions .sl-button {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  height: 42px;
+  min-height: 42px;
+  padding: 0 8px;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-radius-full);
+}
+
+/* ===== 手机端：清空历史和摘要按钮右对齐 ===== */
+@media (max-width: 599px) {
+  .settings-content .chat-clear-history-btn.sl-button { margin-left: auto; }
+}
+
+/* ===== 手机端：添加记忆/清空长期记忆/全部清空 三按钮一行、等宽、左右对齐 ===== */
+@media (max-width: 599px) {
+  .settings-content .chat-memory-actions { flex-wrap: nowrap; }
+  .settings-content .chat-memory-actions .sl-button {
+    flex: 1 1 0;
+    width: auto;
+    min-width: 0;
+    padding: 0 6px;
+  }
+}

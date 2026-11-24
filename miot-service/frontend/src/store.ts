@@ -48,6 +48,8 @@ const defaultConfig: MiotConfig = {
   external_search_playlist_id: '',
   external_search_timeout: 6,
   external_search_no_import: false,
+  fnmusic_local_search_enabled: true,
+  fnmusic_online_search_enabled: true,
   search_priority: 'parallel',
   music_api_model_disabled: [],
   music_api_model_enabled: [],
@@ -118,6 +120,10 @@ export const state = reactive({
   songsLoading: false,
   songsError: '',
   songSearch: '',
+  // 整个本地音乐库的歌曲缓存：搜索态下上方列表基于它过滤，而不是只搜当前歌单。
+  // 虚拟全库歌单 id=2000000000（与后端 WHOLE_LIBRARY_PLAYLIST_ID 对齐）。懒加载一次。
+  librarySongs: [] as Song[],
+  librarySongsLoaded: false,
   // 当前设备在当前所选歌单上次播到哪一首。切歌单/切设备都要重取：进度是按
   // 「设备 × 歌单」记的，换任一维度都是另一条记录。
   playlistProgress: null as PlaylistProgress | null,
@@ -158,6 +164,12 @@ export function deviceName(device: Device): string {
   return device.name || device.alias || '未命名设备';
 }
 
+/** 设备型号后缀（如 " · OH2P"）。小米音箱 model 常为空，型号在 hardware；两者都空则返回空串，避免出现「智能音箱 · 」。 */
+export function deviceModelSuffix(device: Device): string {
+  const model = device.model?.trim() || device.hardware?.trim() || '';
+  return model ? ` · ${model}` : '';
+}
+
 // 歌单选项统一显示成「名称 (歌曲数)」。数量直接来自后端 /playlists 的 song_count，
 // 用户靠它比对新导入的歌曲有没有真的入库（songloft-org/songloft-plugin-miot#79）。
 export function playlistLabel(playlist: Playlist): string {
@@ -181,15 +193,39 @@ export const managedDevices = computed(() =>
   ),
 );
 
+/** 搜索态下上方列表的数据源：全库已加载就用全库，否则退回当前歌单（避免加载期闪空）。 */
+export const searchIsGlobal = computed(
+  () => !!state.songSearch.trim() && state.librarySongsLoaded,
+);
+
 export const visibleSongs = computed(() => {
   const keyword = state.songSearch.trim().toLocaleLowerCase('zh-CN');
   if (!keyword) return state.songs;
-  return state.songs.filter((song) =>
+  const source = state.librarySongsLoaded && state.librarySongs.length
+    ? state.librarySongs
+    : state.songs;
+  return source.filter((song) =>
     [song.title, song.artist, song.album]
       .filter(Boolean)
       .some((value) => String(value).toLocaleLowerCase('zh-CN').includes(keyword)),
   );
 });
+
+/** 懒加载整个本地音乐库（虚拟歌单 2000000000）， searches 首次输入时触发一次。 */
+let libraryRequest = 0;
+export async function ensureLibrarySongs(): Promise<void> {
+  if (state.librarySongsLoaded || libraryRequest) return;
+  libraryRequest += 1;
+  const request = libraryRequest;
+  try {
+    const songs = await get<Song[]>('/playlists/2000000000/songs');
+    if (request === libraryRequest) state.librarySongs = songs || [];
+  } catch {
+    // 加载失败就维持 librarySongsLoaded=false，搜索退回当前歌单，不打断使用。
+  } finally {
+    if (request === libraryRequest) state.librarySongsLoaded = true;
+  }
+}
 
 let snackbarTimer: ReturnType<typeof setTimeout> | null = null;
 let snackbarToken = 0;
@@ -520,16 +556,27 @@ async function runPlayIntent(key: string, run: () => Promise<void>): Promise<voi
   }
 }
 
+/** 虚拟「[音乐库]全部歌曲」歌单 id：搜索态点歌用它播放全库里的任意一首。 */
+const LIBRARY_PLAYLIST_ID = 2000000000;
+
 export async function playSong(song: Song, visibleIndex?: number): Promise<void> {
   if (!state.selectedPlaylistId) throw new Error('请先选择歌单');
-  const fallbackIndex = state.songs.findIndex((item) => item.id === song.id);
-  await runPlayIntent(`song:${state.selectedPlaylistId}:${song.id}`, async () => {
+  // 搜索态下 visibleSongs 来自全库，当前歌单里往往没有这首歌。此时按 song_id
+  // 在虚拟全库歌单里定位播放，才能精确播到用户点的那首（否则会被当作当前歌单
+  // 的下标，播错歌），同时后端 current_song 正确更新、播放器信息同步。
+  const global = searchIsGlobal.value;
+  const playlistId = global ? LIBRARY_PLAYLIST_ID : Number(state.selectedPlaylistId);
+  const source = global ? state.librarySongs : state.songs;
+  const fallbackIndex = source.findIndex((item) => item.id === song.id);
+  await runPlayIntent(`song:${playlistId}:${song.id}`, async () => {
     await playerCommand('/player/play', {
       ...targetBody(),
-      playlist_id: Number(state.selectedPlaylistId),
+      playlist_id: playlistId,
       song_id: song.id,
       start_index: fallbackIndex >= 0 ? fallbackIndex : visibleIndex || 0,
       play_mode: state.player.play_mode || 'order',
+      // 搜索态点歌走单曲模式：播完由后端接 收藏 → 猜你喜欢 → 全部歌曲。
+      one_off: global,
     });
     void refreshPlaylistProgress();
   });

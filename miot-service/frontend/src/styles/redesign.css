@@ -389,10 +389,10 @@ body { text-rendering: optimizeLegibility; }
   align-items: center;
   height: 44px;
   padding: 0 16px;
-  /* 表头对齐主程序曲库：整块直角、无外框，只有一条底部分隔线和一层
-     surfaceContainerLow 底色。给表头加圆角会让整张列表看起来像一张卡片。 */
-  border-bottom: 1px solid var(--md-outline-variant);
-  background: var(--md-surface-container-low);
+  /* 表头对齐主程序曲库：整块直角、无底色、无外框，只有一条 2px 紫色底部分隔线。
+     给表头加圆角会让整张列表看起来像一张卡片。 */
+  border-bottom: 2px solid rgba(90, 75, 224, 0.5);
+  background: transparent;
   color: var(--md-on-surface-variant);
   font-size: 12px;
   font-weight: 600;
@@ -464,15 +464,23 @@ body { text-rendering: optimizeLegibility; }
 }
 .song-artist,
 .song-album { color: var(--md-on-surface-variant); font-size: 13px; }
-.song-row:hover { background: var(--md-surface-container-high); }
+/* 斑马纹：奇数行底色；偶数行无底色。正在播放行也参与斑马纹，保留其本来的
+   背景色，只靠紫色加粗文字区分。
+   用组件下发的真实序号 index 判断（虚拟列表 DOM 位置会变，nth-child 不可靠）。 */
+.song-row.song-row-odd { background: var(--md-surface-container-high); }
+/* 鼠标悬停高亮：覆盖斑马纹底色。 */
+.song-row:hover { background: var(--md-secondary-container); }
+/* 正在播放行：无底色，仅用紫色文字标识。 */
 .song-row-current {
-  border-radius: 12px;
-  background: var(--md-secondary-container);
   color: var(--md-on-secondary-container);
 }
-/* 当前播放行是圆角填充块，不该再画横向分隔线。 */
+/* 当前播放行不画横向分隔线（保持原样，只去掉底色）。 */
 .song-row-current::after { display: none; }
 .song-row-current .song-title { color: var(--md-primary); font-weight: 600; }
+/* 当前播放行的艺术家/专辑/时长：和标题同色同粗。 */
+.song-row-current .song-artist,
+.song-row-current .song-album,
+.song-row-current .song-duration { color: rgb(90, 75, 224); font-weight: 600; }
 .song-actions {
   position: absolute;
   top: 50%;
@@ -512,7 +520,9 @@ body { text-rendering: optimizeLegibility; }
   .player-toolbar > .sl-button .sl-button-label { display: none; }
   .song-list-header { display: none; }
   .song-row { display: block; padding: 0; }
-  .song-row-button { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 0 12px; padding: 7px 56px 7px 8px; }
+  /* 左内边距 12px：与手机档播放条封面（.player-bar 的 padding 12px）左缘对齐；
+     列表已铺满屏幕，这里只挪封面和文字，不影响斑马纹背景与分隔线的满宽。 */
+  .song-row-button { grid-template-columns: 48px minmax(0, 1fr) auto; gap: 0 12px; padding: 7px 56px 7px 12px; }
   .song-copy { display: flex; flex-direction: column; min-width: 0; }
   .song-index,
   .song-album { display: none; }
@@ -678,7 +688,15 @@ body { text-rendering: optimizeLegibility; }
 .player-bar-tools > .player-popup-anchor,
 .player-bar-tools > .sl-button-icon { width: 38px; height: 38px; flex: 0 0 auto; }
 .player-tool-muted { color: var(--md-on-surface-variant); }
-.player-bar .sl-button:hover:not(:disabled) { box-shadow: none; background: var(--md-surface-container-high); }
+/* 桌面端按钮 hover 圆底：30% 透明主题色；主播放键是紫色实心，排除在外。
+   横条与全屏展开页的图标按钮统一同一效果。 */
+.player-bar .sl-button:hover:not(:disabled):not(.bar-play-primary),
+.fullscreen-player .sl-button-icon:hover:not(:disabled):not(.control-primary) {
+  box-shadow: none;
+  background: var(--md-player-hover-layer, var(--md-surface-container-high));
+}
+.player-bar .sl-button.bar-play-primary:hover:not(:disabled),
+.fullscreen-player .sl-button.control-primary:hover:not(:disabled) { box-shadow: none; }
 
 /* Full player mirrors the host player: blurred cover ambience, centered top bar,
    cover/lyrics split on wide screens, and controls grouped below the content. */

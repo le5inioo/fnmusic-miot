@@ -107,6 +107,8 @@ function defaultPluginConfig(): PluginConfig {
     external_search_playlist_id: '',
     external_search_timeout: 6,
     external_search_no_import: false,
+    fnmusic_local_search_enabled: true,
+    fnmusic_online_search_enabled: true,
     search_priority: 'parallel',
     music_api_model_disabled: [],
     music_api_model_enabled: [],

@@ -175,7 +175,7 @@ onMounted(loadConfig);
       icon="info"
       tone="warning"
       flat
-      description="首次安装或升级后，建议确认控制层与控制台使用的端口。可直接保持默认，或手动填写 / 自动填充两个可用端口。"
+      description="首次安装或升级后确认端口；可保持默认，或手动填写/自动填充。"
     >
       <template #actions>
         <SlStatusChip label="待设置" tone="warning" icon="warning" />
@@ -191,24 +191,7 @@ onMounted(loadConfig);
       </div>
     </SectionCard>
 
-    <SectionCard
-      title="当前端口"
-      icon="dns"
-      description="主入口（飞牛音乐桌面图标 / 注入面板）走系统 socket，不随端口变化失联；仅局域网直连控制台需改用新地址。"
-    >
-      <div v-if="loading" class="field-help">正在读取端口配置…</div>
-      <template v-else-if="config">
-        <SettingRow title="控制层端口" :subtitle="`小爱音箱回访与飞牛音乐网关访问 miot 控制层使用的端口（默认 ${config.default_control_port}）`">
-          <SlStatusChip :label="String(config.control_port)" tone="neutral" />
-        </SettingRow>
-        <SettingRow title="控制台端口" :subtitle="`局域网浏览器直连控制台使用的端口（默认 ${config.default_console_port}）`">
-          <SlStatusChip :label="String(config.console_port)" tone="neutral" />
-        </SettingRow>
-      </template>
-      <p v-if="error" class="field-error">{{ error }}</p>
-    </SectionCard>
-
-    <SectionCard title="修改端口" icon="swap_horiz" description="两个端口必须不同，且为 1024~65535 之间未被占用的整数。">
+    <SectionCard title="修改端口" icon="swap_horiz">
       <div class="form-body">
         <div class="port-fields">
           <label class="port-field">
@@ -239,10 +222,8 @@ onMounted(loadConfig);
             :disabled="loading || saving || suggestBusy"
             @click="suggestPorts"
           />
-        </div>
-        <p v-if="validationError" class="field-error">{{ validationError }}</p>
-        <div class="field-actions">
           <SlButton
+            class="port-save-btn"
             variant="filled"
             label="保存并应用"
             icon="save"
@@ -250,6 +231,8 @@ onMounted(loadConfig);
             @click="applyPorts"
           />
         </div>
+        <p v-if="error" class="field-error">{{ error }}</p>
+        <p v-if="validationError" class="field-error">{{ validationError }}</p>
       </div>
     </SectionCard>
 
@@ -268,7 +251,7 @@ onMounted(loadConfig);
           <SlStatusChip :label="String(applied.console_port)" tone="success" />
         </SettingRow>
         <p class="field-help">
-          主入口（飞牛音乐桌面图标 / 注入面板）为系统 socket，端口变更不影响其可用性，稍等几秒刷新本页即可恢复。
+          主入口为系统 socket，不受端口变更影响；稍等几秒刷新即可。
         </p>
         <div v-if="applied.changed" class="field-actions">
           <SlButton
@@ -294,21 +277,25 @@ onMounted(loadConfig);
 
 <style scoped>
 .port-settings { display: flex; flex-direction: column; gap: 16px; min-width: 0; max-width: 100%; }
-/* 桌面端两个端口输入框 + 「自动填充」三者等宽；用 grid 的 minmax(0,…) 保证永不超出容器宽度
-   （旧版 flex + nowrap + 固定 120px 输入框在手机上必然溢出，整个设置子页面被手指左右拖）。 */
-.port-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: end; min-width: 0; }
+/* 桌面端两个端口输入框 + 「自动填充」+「保存并应用」四者等宽一排；用 grid 的 minmax(0,…)
+   保证永不超出容器宽度（旧版 flex + nowrap + 固定 120px 输入框在手机上必然溢出）。 */
+.port-fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: end; min-width: 0; }
 .port-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .port-field-label { font-size: 13px; color: var(--md-on-surface-variant, #555); }
-.port-suggest-btn { min-width: 0; }
+.port-suggest-btn, .port-save-btn { min-width: 0; width: 100%; }
+/* 「自动填充」保留原有圆角与边框样式，只把配色改成与「保存并应用」一致。 */
+.port-suggest-btn.sl-button-tonal {
+  background: var(--md-primary);
+  color: var(--md-on-primary);
+  border-color: var(--md-primary);
+}
 .guide-actions { margin-top: 2px; padding: 0 8px; justify-content: flex-start; }
 .field-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
 .field-help { font-size: 12px; color: var(--md-on-surface-variant, #666); margin: 8px 0 0; line-height: 1.5; }
 .field-error { font-size: 13px; color: #d32f2f; margin: 8px 0 0; }
 
-/* 窄屏（手机）：「自动填充」换到第二行整行显示，两个端口输入框并排占满宽度。
-   三者强行一排会把「设备」子页面撑出横向滚动条。 */
+/* 窄屏（手机）：两个端口输入框一行，两个按钮紧随其后并排一行，避免横向滚动。 */
 @media (max-width: 599px) {
   .port-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
-  .port-suggest-btn { grid-column: 1 / -1; }
 }
 </style>

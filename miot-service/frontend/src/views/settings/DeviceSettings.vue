@@ -5,13 +5,14 @@ import SettingRow from '../../ui/SettingRow.vue';
 import SlButton from '../../ui/SlButton.vue';
 import SlCheckbox from '../../ui/SlCheckbox.vue';
 import SlInput from '../../ui/SlInput.vue';
+import SlIcon from '../../ui/SlIcon.vue';
 import SlSwitch from '../../ui/SlSwitch.vue';
 import SlDisclosure from '../../ui/SlDisclosure.vue';
 import DLNAReceiverSettings from './DLNAReceiverSettings.vue';
 import PortSettings from './PortSettings.vue';
 import { postEnvelope } from '../../api';
 import { navigation } from '../../runtime';
-import { deviceId, deviceName, confirmAction, deleteGroup, loadAccountsAndDevices, loadGroups, messageOf, saveConfig, saveGroup, state, toggleManaged, notify } from '../../store';
+import { deviceId, deviceName, deviceModelSuffix, confirmAction, deleteGroup, loadAccountsAndDevices, loadGroups, messageOf, saveConfig, saveGroup, state, toggleManaged, notify } from '../../store';
 import type { DeviceGroup, DeviceMember } from '../../types';
 
 const authTab = ref<'qrcode' | 'password' | 'token'>('qrcode');
@@ -40,6 +41,13 @@ let qrGen = 0;
 
 const managed = computed(() => state.devices.flatMap((account) => account.devices.filter((device) => device.managed).map((device) => ({ accountId: account.account_id, device }))));
 const accountStatuses = computed(() => state.accounts);
+function accountTitle(account: { account_name?: string; account?: string; id?: string; user_id?: string }): string {
+  const name = account.account_name || account.account || '';
+  const uid = account.user_id || '';
+  if (uid && name === uid) return `User ID：${uid}`;
+  if (uid && name) return `${name} User ID：${uid}`;
+  return uid ? `User ID：${uid}` : name || account.id || '';
+}
 function isDeviceOnline(device: { online?: boolean; presence?: string }): boolean { return device.online === true || device.presence === 'online'; }
 
 onMounted(() => {
@@ -196,52 +204,51 @@ async function toggleMusicApi(hardware: string, enabled: boolean): Promise<void>
 <template>
   <PortSettings />
 
-  <SectionCard title="添加账号" icon="person_add" description="支持扫码、账号密码和手动 Token 三种登录方式。">
-    <div class="tab-strip"><button :class="{ active: authTab === 'qrcode' }" @click="authTab = 'qrcode'">扫码登录</button><button :class="{ active: authTab === 'password' }" @click="authTab = 'password'">账号密码</button><button :class="{ active: authTab === 'token' }" @click="authTab = 'token'">手动 Token</button></div>
+  <SectionCard title="添加账号" icon="person_add">
+    <nav class="auth-method-nav" aria-label="登录方式">
+      <button type="button" class="auth-method-card" :class="{ active: authTab === 'qrcode' }" :aria-current="authTab === 'qrcode' ? 'true' : undefined" @click="authTab = 'qrcode'"><span class="auth-method-icon"><SlIcon name="qr_code_2" :size="20" /></span><span class="auth-method-copy"><strong><span class="auth-name-full">扫码登录</span><span class="auth-name-short">扫码</span></strong><small>米家 App 扫码</small></span></button>
+      <button type="button" class="auth-method-card" :class="{ active: authTab === 'password' }" :aria-current="authTab === 'password' ? 'true' : undefined" @click="authTab = 'password'"><span class="auth-method-icon"><SlIcon name="login" :size="20" /></span><span class="auth-method-copy"><strong><span class="auth-name-full">账号密码</span><span class="auth-name-short">密码</span></strong><small>输入账号密码</small></span></button>
+      <button type="button" class="auth-method-card" :class="{ active: authTab === 'token' }" :aria-current="authTab === 'token' ? 'true' : undefined" @click="authTab = 'token'"><span class="auth-method-icon"><SlIcon name="key" :size="20" /></span><span class="auth-method-copy"><strong><span class="auth-name-full">手动 Token</span><span class="auth-name-short">令牌</span></strong><small>粘贴 Cookie 令牌</small></span></button>
+    </nav>
     <div class="form-body">
-      <template v-if="authTab === 'qrcode'"><p class="field-help">使用米家 App 扫描二维码，扫码成功后会自动创建账号。</p><SlButton variant="filled" block label="获取二维码" icon="qr_code_2" :disabled="qrBusy" @click="startQr" /><div v-if="qrUrl" class="qr-box"><img :src="qrUrl" alt="登录二维码" /><p>{{ qrStatus }}</p></div><p v-else-if="qrStatus" class="field-help">{{ qrStatus }}</p></template>
+      <template v-if="authTab === 'qrcode'"><SlButton variant="filled" block label="获取二维码" icon="qr_code_2" :disabled="qrBusy" @click="startQr" /><div v-if="qrUrl" class="qr-box"><img :src="qrUrl" alt="登录二维码" /><p>{{ qrStatus }}</p></div><p v-else-if="qrStatus" class="field-help">{{ qrStatus }}</p></template>
       <template v-else-if="authTab === 'password'"><div class="field"><label class="field-label">用户名</label><SlInput v-model="username" placeholder="手机号或邮箱" aria-label="用户名" /></div><div class="field"><label class="field-label">密码</label><SlInput v-model="password" type="password" placeholder="密码" aria-label="密码" @submit="submitPassword" /></div><SlButton variant="filled" block label="登录并添加" icon="login" :disabled="loginBusy" @click="submitPassword" /><p v-if="loginMessage" class="field-help">{{ loginMessage }}</p><div v-if="loginMessage.includes('验证码')" class="sub-panel"><img v-if="captchaImage" :src="'data:image/png;base64,' + captchaImage" alt="图形验证码" class="captcha-img" /><SlInput v-model="captcha" placeholder="输入图形验证码" aria-label="验证码" /><SlButton variant="filled" label="提交验证码" @click="submitCaptcha" /></div><div v-if="verifyUrl || loginMessage.includes('二次')" class="sub-panel"><SlButton variant="outlined" label="打开验证页面" icon="open_in_new" @click="openVerifyPage" /><div class="inline-fields" style="margin-top:8px"><SlInput v-model="verifyCode" placeholder="验证码" aria-label="二次验证码" /><SlButton variant="filled" label="提交" @click="submitVerify" /></div></div></template>
-      <template v-else><p class="field-help">从浏览器 Cookie 中获取 userId 和 passToken。凭据只发送给 MIoT 插件，不会显示在日志中。</p><div class="field"><label class="field-label">User ID</label><SlInput v-model="tokenUserId" placeholder="Cookie 中的 userId" aria-label="User ID" /></div><div class="field"><label class="field-label">Pass Token</label><SlInput v-model="passToken" type="password" placeholder="Cookie 中的 passToken" aria-label="Pass Token" /></div><SlButton variant="filled" block label="添加账号" icon="key" @click="addToken" /></template>
+      <template v-else><div class="field"><label class="field-label">User ID</label><SlInput v-model="tokenUserId" placeholder="Cookie 中的 userId" aria-label="User ID" /></div><div class="field"><label class="field-label">Pass Token</label><SlInput v-model="passToken" type="password" placeholder="Cookie 中的 passToken" aria-label="Pass Token" /></div><SlButton variant="filled" block label="添加账号" icon="key" @click="addToken" /></template>
     </div>
   </SectionCard>
 
   <SectionCard title="已登录账号" icon="group">
-    <div class="form-body"><div v-if="!accountStatuses.length" class="empty-state">暂无账号，请先添加</div><div v-for="account in accountStatuses" :key="account.id" class="list-item"><div class="list-item-copy"><strong class="list-item-title">{{ account.account_name || account.account || account.id }}</strong><span class="list-item-subtitle">{{ account.logged_in && account.is_valid !== false ? '已登录' : '需要重新登录' }}<span v-if="account.user_id"> · User ID {{ account.user_id }}</span></span></div><span class="chip" :class="account.logged_in && account.is_valid !== false ? 'chip-success' : 'chip-warning'">{{ account.logged_in && account.is_valid !== false ? '正常' : '待处理' }}</span><SlButton variant="icon" icon="refresh" title="重新登录" @click="relogin(account.id)" /><SlButton variant="icon" icon="delete" title="删除账号" @click="removeAccount(account.id)" /></div></div>
+    <div class="form-body"><div v-if="!accountStatuses.length" class="empty-state">暂无账号，请先添加</div><div v-for="account in accountStatuses" :key="account.id" class="list-item"><div class="list-item-copy"><strong class="list-item-title">{{ accountTitle(account) }}</strong></div><span class="chip" :class="account.logged_in && account.is_valid !== false ? 'chip-success' : 'chip-warning'">{{ account.logged_in && account.is_valid !== false ? '正常' : '待处理' }}</span><SlButton variant="icon" icon="refresh" title="重新登录" @click="relogin(account.id)" /><SlButton variant="icon" icon="delete" title="删除账号" @click="removeAccount(account.id)" /></div></div>
   </SectionCard>
 
-  <SectionCard title="设备管理" icon="speaker_group" description="新发现的设备默认全部勾选。可取消勾选不需要管理的设备，已有选择会保留；仅勾选的设备参与语音监听，并显示在播放选择器、分组和定时任务中。">
-    <div class="form-body"><div v-if="!state.devices.length" class="empty-state">暂无设备，请先登录账号并刷新。</div><div v-for="account in state.devices" :key="account.account_id" class="device-account"><h3 class="card-title">{{ account.account_name || account.account_id }}</h3><div v-for="device in account.devices" :key="deviceId(device)" class="device-check-row"><SlCheckbox :model-value="!!device.managed" :aria-label="`管理 ${deviceName(device)}`" @update:model-value="setManaged(account.account_id, deviceId(device), $event)" /><div class="device-check-copy"><strong>{{ deviceName(device) }}</strong><small>{{ device.model || device.hardware || '未知型号' }} · {{ isDeviceOnline(device) ? '在线' : '离线' }}</small></div><span class="chip" :class="isDeviceOnline(device) ? 'chip-success' : 'chip-warning'">{{ isDeviceOnline(device) ? '在线' : '离线' }}</span></div></div></div>
+  <SectionCard title="设备管理" icon="speaker_group">
+    <div class="form-body"><div v-if="!state.devices.length" class="empty-state">暂无设备，请先登录账号并刷新。</div><div v-for="account in state.devices" :key="account.account_id" class="device-account"><div v-for="device in account.devices" :key="deviceId(device)" class="device-check-row"><SlCheckbox :model-value="!!device.managed" :aria-label="`管理 ${deviceName(device)}`" @update:model-value="setManaged(account.account_id, deviceId(device), $event)" /><div class="device-check-copy"><strong>{{ deviceName(device) }}</strong><small>{{ account.account_name || account.account_id }}·{{ device.model || device.hardware || '未知型号' }}·{{ isDeviceOnline(device) ? '在线' : '离线' }}</small></div><span class="chip" :class="isDeviceOnline(device) ? 'chip-success' : 'chip-warning'">{{ isDeviceOnline(device) ? '在线' : '离线' }}</span></div></div></div>
   </SectionCard>
 
-  <SectionCard title="设备分组" icon="speaker_group" description="组内设备共享队列、播放模式和控制操作；一台设备只能属于一个组。">
-    <div class="form-body"><SlButton variant="filled" block label="新建分组" icon="add" @click="openGroup()" /><div v-if="groupEditor" class="sub-panel"><div class="field"><label class="field-label">分组名称</label><SlInput v-model="groupName" placeholder="例如 客厅 + 卧室" aria-label="分组名称" /></div><label class="field-label">选择至少两台已管理设备</label><div v-for="item in managed" :key="`${item.accountId}:${deviceId(item.device)}`" class="device-check-row"><SlCheckbox :model-value="selectedMembers.includes(`${item.accountId}:${deviceId(item.device)}`)" @update:model-value="(value) => value ? selectedMembers.push(`${item.accountId}:${deviceId(item.device)}`) : selectedMembers = selectedMembers.filter((key) => key !== `${item.accountId}:${deviceId(item.device)}`)" /><div class="device-check-copy"><strong>{{ deviceName(item.device) }}</strong><small>{{ item.accountId }}</small></div></div><div class="field-actions"><SlButton variant="text" label="取消" @click="closeGroup" /><SlButton variant="filled" label="保存" icon="save" @click="saveCurrentGroup" /></div></div><div v-if="!state.groups.length && !groupEditor" class="empty-state">暂无分组</div><div v-for="group in state.groups" :key="group.id" class="list-item"><div class="list-item-copy"><strong class="list-item-title">{{ group.name }}</strong><span class="list-item-subtitle">{{ group.members.length }} 台设备</span></div><SlButton variant="icon" icon="edit" title="编辑分组" @click="openGroup(group)" /><SlButton variant="icon" icon="delete" title="删除分组" @click="removeGroup(group.id)" /></div></div>
+  <SectionCard title="设备分组" icon="speaker_group">
+    <div class="form-body"><SlButton variant="filled" block label="新建分组" icon="add" @click="openGroup()" /><div v-if="groupEditor" class="sub-panel group-editor"><div class="field"><label class="field-label">分组名称</label><SlInput v-model="groupName" placeholder="例如 客厅 + 卧室" aria-label="分组名称" /></div><div v-for="item in managed" :key="`${item.accountId}:${deviceId(item.device)}`" class="device-check-row"><SlCheckbox :model-value="selectedMembers.includes(`${item.accountId}:${deviceId(item.device)}`)" @update:model-value="(value) => value ? selectedMembers.push(`${item.accountId}:${deviceId(item.device)}`) : selectedMembers = selectedMembers.filter((key) => key !== `${item.accountId}:${deviceId(item.device)}`)" /><div class="device-check-copy"><strong>{{ deviceName(item.device) }}{{ deviceModelSuffix(item.device) }}</strong><small>{{ item.accountId }}</small></div></div><div class="field-actions"><SlButton variant="text" label="取消" @click="closeGroup" /><SlButton variant="filled" label="保存" icon="save" @click="saveCurrentGroup" /></div></div><div v-if="!state.groups.length && !groupEditor" class="empty-state">暂无分组</div><div v-for="group in state.groups" :key="group.id" class="list-item"><div class="list-item-copy"><strong class="list-item-title">{{ group.name }}</strong><span class="list-item-subtitle">{{ group.members.length }} 台设备</span></div><SlButton variant="icon" icon="edit" title="编辑分组" @click="openGroup(group)" /><SlButton variant="icon" icon="delete" title="删除分组" @click="removeGroup(group.id)" /></div></div>
   </SectionCard>
 
   <DLNAReceiverSettings />
 
-  <SlDisclosure title="高级设备兼容" icon="speaker" description="按设备型号调整 Music API 与指示灯行为。">
+  <SlDisclosure title="高级设备兼容" icon="speaker">
     <div class="form-body">
-      <label class="field-label">按型号选择 Music API 播放</label>
-      <p class="field-help">勾选使用 Music API，取消勾选使用直链播放。部分型号（含 Xiaomi Sound 2 Pro / OH1P）需要 Music API 才能正常发声，兼容性取决于设备固件。</p>
-      <p class="field-help">所有已识别型号均可切换，包括不在默认清单里的新型号，无需等待插件更新；遇到歌尾复播或切歌异常可取消勾选，若取消后无声请重新勾选。</p>
-      <p class="field-help">保存后，下次下发歌曲时生效，当前播放不会立即切换；同一型号的所有设备共用此设置。</p>
-      <p v-if="!musicApiModelRows.length" class="field-help">尚未识别到任何设备型号，登录并开启设备管理后会出现在这里。</p>
+      <p v-if="!musicApiModelRows.length" class="field-help">尚未识别到型号，登录并开启设备管理后显示。</p>
       <div v-for="row in musicApiModelRows" :key="row.hardware" class="device-check-row">
         <SlCheckbox :model-value="isMusicApiEnabled(row.hardware)" :aria-label="`使用 Music API 播放 ${row.hardware}`" @update:model-value="toggleMusicApi(row.hardware, $event)" />
         <div class="device-check-copy">
           <strong>{{ row.hardware }}</strong>
-          <small>{{ row.deviceName }}</small>
-          <small>当前设置：{{ isMusicApiEnabled(row.hardware) ? 'Music API' : '直链播放' }}</small>
+          <small>{{ row.deviceName }} · {{ isMusicApiEnabled(row.hardware) ? 'Music API' : '直链播放' }}</small>
         </div>
         <span v-if="row.inDefaults && isMusicApiEnabled(row.hardware)" class="chip chip-success">默认</span>
         <span v-else-if="isMusicApiEnabled(row.hardware)" class="chip chip-success">手动开启</span>
         <span v-else-if="row.inDefaults" class="chip chip-warning">手动关闭</span>
       </div>
-      <p v-if="defaultsMissingFromDevices.length" class="field-help">
-        默认清单中未在当前账号出现的型号：
-        <span v-for="hw in defaultsMissingFromDevices" :key="hw" class="chip" style="margin-left:6px">{{ hw }}</span>
+      <p v-if="defaultsMissingFromDevices.length" class="field-help model-chip-list">
+        <span class="model-chip-label">已知可支持的型号：</span>
+        <span v-for="hw in defaultsMissingFromDevices" :key="hw" class="chip model-chip">{{ hw }}</span>
       </p>
     </div>
-    <SettingRow title="播放时保持指示灯" subtitle="关闭后播放时音箱指示灯不亮，适合夜间使用"><SlSwitch v-model="state.config.indicator_light_enabled" aria-label="播放时保持指示灯" @update:model-value="saveConfig({ indicator_light_enabled: $event })" /></SettingRow>
+    <SettingRow title="播放时保持指示灯"><SlSwitch v-model="state.config.indicator_light_enabled" aria-label="播放时保持指示灯" @update:model-value="saveConfig({ indicator_light_enabled: $event })" /></SettingRow>
   </SlDisclosure>
 </template>

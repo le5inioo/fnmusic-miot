@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
+import type { CSSProperties } from 'vue';
 import { useSongCover } from '../covers';
 import { usePlayerMaterial } from '../playerMaterial';
+import { extractCoverPalette, paletteFromMetadata, paletteStyle } from '../playerPalette';
 import { notifyHostFavorite, openPage } from '../runtime';
 import { currentDevice, notify, playerCommand, seekPlayer, setPlayMode, setVolume, state } from '../store';
 import { get, messageOf, post, query } from '../api';
@@ -72,6 +74,49 @@ const favoriteBusy = ref(false);
 const sleepTimerBusy = ref(false);
 const sleepTimer = ref<SleepTimerStatus>({ active: false, mode: 'time', remaining: 0, total: 0 });
 const { src: cover, epoch: coverEpoch, onError: onCoverError, onLoad: onCoverLoad } = useSongCover(() => state.player.current_song, 96);
+
+// 横条背景跟随专辑：与全屏播放页共用同一套取色（先元数据回退，再异步封面提取）。
+// 取色结果落到 --player-palette-*，由 panel-tools 注入的横条背景规则消费，
+// 保证横条与展开后的全屏背景是同一首歌的同一组色。
+const barPaletteStyle = ref<CSSProperties>({});
+let barPaletteGeneration = 0;
+// 手机档播放条下方那条 homebar 留白要跟随横条专辑色，但横条的 palette 变量只内联在
+// .player-bar-shell 上，::after 拿不到；这里把同一组变量同步到 :root 供底部填充复用。
+const ROOT_PALETTE_KEYS = [
+  '--player-palette-dominant',
+  '--player-palette-vibrant',
+  '--player-palette-dark',
+  '--player-palette-on-image',
+  '--player-palette-on-image-muted',
+  '--player-palette-on-image-faint',
+] as const;
+function syncRootPalette(style: CSSProperties): void {
+  const root = document.documentElement;
+  for (const key of ROOT_PALETTE_KEYS) {
+    const value = (style as Record<string, unknown>)[key];
+    if (typeof value === 'string' && value) root.style.setProperty(key, value);
+  }
+}
+async function refreshBarPalette(): Promise<void> {
+  const generation = ++barPaletteGeneration;
+  const song = state.player.current_song;
+  barPaletteStyle.value = paletteStyle(paletteFromMetadata(song));
+  syncRootPalette(barPaletteStyle.value);
+  if (!song || !cover.value) return;
+  const url = cover.value;
+  const extracted = await extractCoverPalette(url);
+  if (generation !== barPaletteGeneration || state.player.current_song?.id !== song.id) return;
+  if (extracted) {
+    barPaletteStyle.value = paletteStyle(extracted);
+    syncRootPalette(barPaletteStyle.value);
+  }
+}
+watch(
+  () => [state.player.current_song?.id, state.player.current_song?.cover_url, cover.value] as const,
+  () => { void refreshBarPalette(); },
+  { immediate: true },
+);
+const barStyle = computed<CSSProperties>(() => ({ ...playerMaterial.value, ...barPaletteStyle.value }));
 
 const hasSong = computed(() => !!state.player.current_song);
 // 主程序 MiniPlayer（手机档）没有歌曲时整条不渲染；DesktopPlayer 保留占位。
@@ -322,7 +367,7 @@ async function cancelSleepTimer(): Promise<void> {
     v-if="showBar"
     class="player-bar-shell"
     :class="`player-bar-${density}`"
-    :style="playerMaterial"
+    :style="barStyle"
     title="打开全屏播放器"
     @click="onBarSurfaceClick"
   >

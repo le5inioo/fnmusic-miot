@@ -41,6 +41,8 @@ export interface MiotConfig {
   external_search_playlist_id: string;
   external_search_timeout: number;
   external_search_no_import: boolean;
+  fnmusic_local_search_enabled: boolean;
+  fnmusic_online_search_enabled: boolean;
   search_priority: 'parallel' | 'local_first' | 'external_first';
   music_api_model_disabled: string[];
   music_api_model_enabled: string[];

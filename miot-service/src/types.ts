@@ -178,6 +178,8 @@ export interface PluginConfig {
   external_search_playlist_id: string; // 外部搜索导入后追加到的歌单 ID，空串表示不追加
   external_search_timeout: number;     // 外部搜索超时（秒），默认 6
   external_search_no_import: boolean;   // 不入库直接播放：命中直链型结果时直接把原始 URL 推给音箱，不写入曲库（临时链接友好）
+  fnmusic_local_search_enabled: boolean;   // 飞牛音乐本地搜索：允许命中飞牛本地曲库（is_online=false）
+  fnmusic_online_search_enabled: boolean;  // 飞牛音乐外部搜索：允许命中 ext 注入的联网音源（is_online=true）
   search_priority: SearchPriority;     // 搜歌优先级策略
   music_api_model_disabled?: string[]; // 显式禁用 Music API 的型号（覆盖内置默认清单）
   music_api_model_enabled?: string[];  // 显式启用 Music API 的型号（让默认清单外的新型号也能走 Music API）

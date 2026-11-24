@@ -88,8 +88,12 @@ export function readChatConfig(raw: Partial<ChatConfig>): ChatConfig {
   return validateChatConfig(raw, { ...DEFAULT_CHAT_CONFIG, memory_enabled: true, context_turns: 12, summary_enabled: true });
 }
 export function chatConnection(config: ChatConfig, analysis: AIConfig): AIConnection {
-  const base = config.connection === 'analysis' ? analysis : config;
-  return { enabled: config.enabled, api_protocol: config.api_protocol, api_url: base.api_url, api_key: base.api_key, ...(base.custom_headers !== undefined ? { custom_headers: base.custom_headers } : {}), model: config.model || base.model, timeout: config.timeout };
+  // 复用默认模型连接时完全采用默认连接的模型：config.model 可能是用户之前
+  // 在独立连接里填的其它厂商模型（如 sensenova），残留下来会被发往默认服务
+  // 商（如 DashScope）导致 404。复用连接的语义就是不覆盖，故此处忽略它。
+  const analysisMode = config.connection === 'analysis';
+  const base = analysisMode ? analysis : config;
+  return { enabled: config.enabled, api_protocol: config.api_protocol, api_url: base.api_url, api_key: base.api_key, ...(base.custom_headers !== undefined ? { custom_headers: base.custom_headers } : {}), model: analysisMode ? base.model : (config.model || base.model), timeout: config.timeout };
 }
 export type ChatPhase = 'queued' | 'preparing' | 'generating' | 'speaking' | 'resuming' | 'completed' | 'cancelled' | 'failed' | 'unknown';
 export interface ChatTurn {

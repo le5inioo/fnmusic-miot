@@ -1,7 +1,7 @@
 /* panel-tools.js
  * 面板轻量改造（不重建 Vue bundle，只注入 CSS + 少量 DOM）：
  *  - 显示比例固定 100%（不再沿用旧的 115% 缩放偏好）；
- *  - 顶栏原「Miot小爱音箱 / 智能音箱 · 待机」两行文字全部隐去，改为
+ *  - 顶栏原「Miotunes / 智能音箱 · 待机」两行文字全部隐去，改为
  *    「连接图标（定制 PNG）+ 三个状态圆点」：音箱连接(红/蓝/绿) / 控制层(红/绿) / 曲库(红/绿)；
  *    图标无提示词，圆点保留原生 title 提示；全部去掉 help 问号光标；
  *  - 「主题切换」并入面板原有应用栏，视觉上排在「选择设备」图标之前；
@@ -52,6 +52,24 @@
   /* 定制连接图标（160x160 透明 PNG，内嵌避免额外静态文件） */
   var CONN_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAYAAACLz2ctAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAyZpVFh0WE1MOmNvbS5hZG9iZS54bXAAAAAAADw/eHBhY2tldCBiZWdpbj0i77u/IiBpZD0iVzVNME1wQ2VoaUh6cmVTek5UY3prYzlkIj8+IDx4OnhtcG1ldGEgeG1sbnM6eD0iYWRvYmU6bnM6bWV0YS8iIHg6eG1wdGs9IkFkb2JlIFhNUCBDb3JlIDUuNi1jMTM4IDc5LjE1OTgyNCwgMjAxNi8wOS8xNC0wMTowOTowMSAgICAgICAgIj4gPHJkZjpSREYgeG1sbnM6cmRmPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5LzAyLzIyLXJkZi1zeW50YXgtbnMjIj4gPHJkZjpEZXNjcmlwdGlvbiByZGY6YWJvdXQ9IiIgeG1sbnM6eG1wPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvIiB4bWxuczp4bXBNTT0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wL21tLyIgeG1sbnM6c3RSZWY9Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9zVHlwZS9SZXNvdXJjZVJlZiMiIHhtcDpDcmVhdG9yVG9vbD0iQWRvYmUgUGhvdG9zaG9wIENDIDIwMTcgKFdpbmRvd3MpIiB4bXBNTTpJbnN0YW5jZUlEPSJ4bXAuaWlkOkVFNTBBQjQyREQwMDExRjE5OEUxODczQUVEQkYxQ0JCIiB4bXBNTTpEb2N1bWVudElEPSJ4bXAuZGlkOkVFNTBBQjQzREQwMDExRjE5OEUxODczQUVEQkYxQ0JCIj4gPHhtcE1NOkRlcml2ZWRGcm9tIHN0UmVmOmluc3RhbmNlSUQ9InhtcC5paWQ6RUU1MEFCNDBERDAwMTFGMTk4RTE4NzNBRURCRjFDQkIiIHN0UmVmOmRvY3VtZW50SUQ9InhtcC5kaWQ6RUU1MEFCNDFERDAwMTFGMTk4RTE4NzNBRURCRjFDQkIiLz4gPC9yZGY6RGVzY3JpcHRpb24+IDwvcmRmOlJERj4gPC94OnhtcG1ldGE+IDw/eHBhY2tldCBlbmQ9InIiPz5wJoLPAAAJMklEQVR42uyd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';
 
+  /* 状态灯行前的音箱图标：与设置页「设备」项 SlIcon name="speaker" 同款字形，
+     轮廓从 miot-ui-icons.otf 的码点 0xe32d 精确提取（24x24）。
+     用 currentColor 填充，颜色随主题跟随 --md-on-surface，与菜单下方四个图标一致。
+     菜单按钮（三点那个）仍用 CONN_PNG，不受影响。 */
+  var SPEAKER_PATHS = 'M17 22H7Q6.18 22 5.59 21.41Q5 20.82 5 20V4'
+    + 'Q5 3.17 5.59 2.59Q6.18 2 7 2H17Q17.82 2 18.41 2.59'
+    + 'Q19 3.17 19 4V20Q19 20.82 18.41 21.41Q17.82 22 17 22Z'
+    + 'M17 20V4H7V20Z'
+    + 'M12 9Q12.83 9 13.41 8.41Q14 7.82 14 7Q14 6.18 13.41 5.59'
+    + 'Q12.83 5 12 5Q11.18 5 10.59 5.59Q10 6.18 10 7'
+    + 'Q10 7.82 10.59 8.41Q11.18 9 12 9Z'
+    + 'M12 19Q13.65 19 14.82 17.82Q16 16.65 16 15Q16 13.35 14.82 12.18'
+    + 'Q13.65 11 12 11Q10.35 11 9.18 12.18Q8 13.35 8 15'
+    + 'Q8 16.65 9.18 17.82Q10.35 19 12 19Z'
+    + 'M12 17Q11.18 17 10.59 16.41Q10 15.82 10 15Q10 14.17 10.59 13.59'
+    + 'Q11.18 13 12 13Q12.83 13 13.41 13.59Q14 14.17 14 15'
+    + 'Q14 15.82 13.41 16.41Q12.83 17 12 17Z';
+
   /* ------------------------------------------------------------------ 样式 */
   var CSS = [
     ':root { --pt-red:#d92d20; --pt-blue:#2563eb; --pt-green:#12805c;',
@@ -59,19 +77,68 @@
     ':root[data-theme="dark"] { --pt-red:#ff9d95; --pt-blue:#8ab4f8;',
     '  --pt-green:#7ee2b8; --pt-idle:#9aa0a6; --pt-bar-bg:var(--md-surface); }',
 
+    /* 底部横条 = 展开页 ambient 在「屏幕最底部同高」的一段切片。
+       关键：渐变层的 background-size 固定为整个视口高、position 贴底，
+       这样 66px 的横条显示的就是全屏渐变最底部那一段，而不是把整幅渐变
+       压缩到横条里（位置不同 → 颜色不同）。再叠一层 tint 对应展开页的
+       .fullscreen-ambient-tint（底部是 surface 冲淡）；tint 用固定 rgba
+       而非 color-mix，兼容手机内置 WebView 老内核。 */
+    ':root { --pt-bar-tint:rgba(250,249,254,.44); }',
+    ':root[data-theme="dark"] { --pt-bar-tint:rgba(17,17,22,.44); }',
+    '.player-bar-shell {',
+    '  --md-on-surface:var(--player-palette-on-image);',
+    '  --md-on-surface-variant:var(--player-palette-on-image-muted);',
+    '  --md-outline:var(--player-palette-on-image-muted);',
+    '  --md-outline-variant:var(--player-palette-on-image-faint);',
+    '  color:var(--player-palette-on-image);',
+    '  background-image:',
+    '    linear-gradient(var(--pt-bar-tint), var(--pt-bar-tint)),',
+    '    radial-gradient(circle at 14% 10%, var(--player-palette-vibrant, rgb(230,227,247)) 0%, transparent 52%),',
+    '    radial-gradient(circle at 88% 24%, var(--player-palette-dominant, rgb(230,227,247)) 0%, transparent 58%),',
+    '    linear-gradient(155deg, var(--player-palette-dominant, rgb(230,227,247)),',
+    '      var(--player-palette-dark, rgb(230,227,247))) !important;',
+    '  background-size:100% 100%, 100vw 100vh, 100vw 100vh, 100vw 100vh !important;',
+    '  background-position:center bottom !important;',
+    '  background-repeat:no-repeat !important;',
+    '  transition:background .8s ease; }',
+    'html[data-navigation-style="capsule"] .player-bar-shell::before {',
+    '  background-image:',
+    '    linear-gradient(var(--pt-bar-tint), var(--pt-bar-tint)),',
+    '    radial-gradient(circle at 14% 10%, var(--player-palette-vibrant, rgb(230,227,247)) 0%, transparent 52%),',
+    '    radial-gradient(circle at 88% 24%, var(--player-palette-dominant, rgb(230,227,247)) 0%, transparent 58%),',
+    '    linear-gradient(155deg, var(--player-palette-dominant, rgb(230,227,247)),',
+    '      var(--player-palette-dark, rgb(230,227,247))) !important;',
+    '  background-size:100% 100%, 100vw 100vh, 100vw 100vh, 100vw 100vh !important;',
+    '  background-position:center bottom !important;',
+    '  background-repeat:no-repeat !important; }',
+
+    /* 播放进度条：填充 60%；紫色小圆点与灰色轨道 50% 透明度 */
+    '.player-bar-progress-fill, .player-seek-active, .player-mini-progress-active {',
+    '  opacity:.6 !important; }',
+    '.player-bar-progress-thumb, .player-seek-thumb {',
+    '  opacity:.5 !important; }',
+    '.player-bar-progress-track, .player-seek-track, .player-mini-progress {',
+    '  background-color:rgba(228,225,237,.5) !important; }',
+    ':root[data-theme="dark"] .player-bar-progress-track,',
+    ':root[data-theme="dark"] .player-seek-track,',
+    ':root[data-theme="dark"] .player-mini-progress {',
+    '  background-color:rgba(51,49,60,.5) !important; }',
+
     /* 标题文字全部隐去，只留连接图标 + 三个圆点 */
     '.miot-main-appbar .miot-appbar-title { font-size:0 !important; }',
     '.miot-main-appbar .miot-appbar-subtitle { display:none !important; }',
     '.pt-status { display:inline-flex; align-items:center; gap:9px;',
     '  vertical-align:middle; font-size:0; line-height:1; }',
     '.pt-conn { display:inline-flex; align-items:center; justify-content:center;',
-    '  width:22px; height:22px; flex:none; cursor:default; }',
-    '.pt-conn img { width:22px; height:22px; display:block; object-fit:contain;',
+    '  width:20px; height:20px; flex:none; cursor:default;',
+    '  color:var(--md-on-surface); }',
+    '.pt-conn img { width:20px; height:20px; display:block; object-fit:contain;',
     '  pointer-events:none; }',
-    ':root[data-theme="dark"] .pt-conn img { filter:brightness(1.3); }',
+    '.pt-conn svg { width:20px; height:20px; display:block; pointer-events:none;',
+    '  fill:currentColor; }',
     /* 定制图标的图形重心偏下（两根短竖条中心约在 70% 高度），圆点随之下移 */
     '.pt-dot-sm { position:relative; top:4px;',
-    '  width:8px; height:8px; border-radius:50%; flex:none;',
+    '  width:7px; height:7px; border-radius:50%; flex:none;',
     '  background:currentColor; color:var(--pt-idle); cursor:default;',
     '  box-shadow:0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }',
     '.pt-dot-sm.red { color:var(--pt-red); }',
@@ -83,14 +150,14 @@
     '.pt-theme-inline { order:-1; }',
     '.pt-theme-inline .sl-button-content { display:inline-flex;',
     '  align-items:center; justify-content:center; }',
-    '.pt-theme-inline svg { width:22px; height:22px; display:block; }',
+    '.pt-theme-inline svg { width:20px; height:20px; display:block; }',
 
     /* 主题切换的轻提示（不是工具条控件） */
     '.pt-toast { position:fixed; left:50%; bottom:20px; transform:translate(-50%,12px);',
     '  z-index:300; max-width:min(92vw,620px); padding:11px 15px;',
     '  border-radius:14px; border:1px solid var(--md-outline-variant);',
     '  background:var(--md-surface-container-low, var(--md-surface));',
-    '  color:var(--md-on-surface); box-shadow:0 8px 24px #0003;',
+    '  color:var(--md-on-surface); box-shadow:0 8px 22px #0003;',
     '  font-size:13px; line-height:1.55; opacity:0; pointer-events:none;',
     '  transition:opacity .2s ease, transform .2s ease; }',
     '.pt-toast.show { opacity:1; transform:translate(-50%,0); pointer-events:auto; }',
@@ -99,29 +166,41 @@
     /* AI 对话播报「未确认」是终态残留，不再常驻顶部 */
     '.chat-activity.pt-stale { display:none !important; }',
 
-    /* 桌面：44px 圆形「继续播放」+ 240px 搜索框（原 120px 加倍），剩余宽度全给歌单框 */
+    /* 桌面：40px 圆形「继续播放」+ 240px 搜索框（原 120px 加倍），剩余宽度全给歌单框 */
     '@media (min-width:720px) {',
     '  .miot-page > .player-toolbar { flex-wrap:nowrap; row-gap:0;',
-    '    min-height:44px !important; }',
+    '    min-height:40px !important; position:relative !important;',
+    /* 工具栏提升层叠级别：菜单 #pt-more-menu（z-index:220）被 isolation 困在
+       工具栏内部，工具栏自身若 z-index:auto，DOM 靠后的歌曲列表行会盖住菜单，
+       导致菜单点不到。给工具栏明确 z-index，让整个工具栏连同菜单盖在列表之上。 */
+    '    isolation:isolate !important; background:transparent !important;',
+    '    z-index:150 !important; }',
+    /* 背景单独铺满视口：按钮留在工具行原位不动，只有 ::before 横向撑到窗口两侧，
+       上贴窗口顶（抵消 .miot-page 的 10px+safe-top），下贴下一行上沿（16px margin）。 */
+    '  .miot-page > .player-toolbar::before { content:""; position:absolute;',
+    '    z-index:-1; pointer-events:none;',
+    '    top:calc(-10px - var(--sl-safe-top, 0px)) !important; bottom:-16px !important;',
+    '    left:50% !important; transform:translateX(-50%) !important; width:100vw !important;',
+    '    background:var(--md-secondary-container); }',
     '  .miot-page > .player-toolbar > .toolbar-field {',
     '    flex:1 1 0 !important; min-width:170px; }',
     '  .miot-page > .player-toolbar > .toolbar-field .sl-select-trigger {',
-    '    height:44px !important; min-height:44px !important; max-height:44px !important; }',
+    '    height:40px !important; min-height:40px !important; max-height:40px !important; }',
     '  .miot-page > .player-toolbar > .sl-button {',
-    '    flex:0 0 44px !important; width:44px !important;',
-    '    min-width:44px !important; max-width:44px !important;',
-    '    height:44px !important; min-height:44px !important;',
+    '    flex:0 0 40px !important; width:40px !important;',
+    '    min-width:40px !important; max-width:40px !important;',
+    '    height:40px !important; min-height:40px !important;',
     '    padding:0 !important; margin:0 !important;',
     '    border-radius:50% !important; overflow:hidden; }',
     '  .miot-page > .player-toolbar > .sl-button .sl-button-label { display:none !important; }',
-    '  .miot-page > .player-toolbar > .sl-button .sl-icon { font-size:22px !important; }',
+    '  .miot-page > .player-toolbar > .sl-button .sl-icon { font-size:20px !important; }',
     '  .miot-page > .player-toolbar > .search-bar {',
     '    flex:0 0 240px !important; width:240px !important;',
     '    min-width:0 !important; max-width:240px !important;',
-    '    margin-bottom:0 !important; height:44px;',
+    '    margin-bottom:0 !important; height:40px;',
     '    padding:0 8px !important; gap:4px !important; }',
     '  .miot-page > .player-toolbar > .search-bar .sl-button-icon {',
-    '    width:30px !important; height:30px !important; min-height:30px !important; }',
+    '    width:27px !important; height:27px !important; min-height:27px !important; }',
     /* 让输入文字真正可见：原来是 120px 宽，被图标和两个按钮挤到几乎 0 宽 */
     '  .miot-page > .player-toolbar > .search-bar input {',
     '    flex:1 1 auto !important; min-width:0 !important;',
@@ -158,66 +237,160 @@
     /* ===== 手机/窄屏：工具行三控件一行，两个圆形按钮 ===== */
     '@media (max-width:719px) {',
     '  .miot-page > .player-toolbar { display:flex !important; align-items:center;',
-    '    position:relative; gap:8px !important; min-height:0 !important;',
-    '    margin-bottom:8px !important; padding:0 !important;',
+    '    position:relative; isolation:isolate !important; gap:8px !important;',
+    '    min-height:0 !important; margin-bottom:8px !important; padding:0 !important;',
     '    border:0 !important; background:transparent !important; }',
+    /* 手机端菜单展开时临时提升工具栏层叠级别：菜单 z-index:220 被 isolation 困在
+       工具栏内部，平时工具栏 z-index:auto 会被列表行盖住。只在菜单打开时提升，
+       避免常驻高 z-index 干扰搜索二级页（z-index:135）。class 由菜单开关 JS 维护。 */
+    '  .miot-page > .player-toolbar.pt-menu-open { z-index:150 !important; }',
+    /* 背景独立铺满视口，工具行按钮保持原位；上贴窗口顶，下贴下一行上沿（8px margin）。 */
+    '  .miot-page > .player-toolbar::before { content:""; position:absolute;',
+    '    z-index:-1; pointer-events:none;',
+    '    top:calc(-10px - var(--sl-safe-top, 0px)) !important; bottom:-8px !important;',
+    '    left:50% !important; transform:translateX(-50%) !important; width:100vw !important;',
+    '    background:var(--md-secondary-container); }',
+    /* 工具栏下缘发丝线：与歌曲列表行分割线同款（outline-variant 半透明 + scaleY(.5)），
+       同样铺满视口；bottom:-8px 贴在淡紫背景底边上（补偿工具栏 margin-bottom）。 */
+    '  .miot-page > .player-toolbar::after { content:""; position:absolute;',
+    '    z-index:1; pointer-events:none;',
+    '    bottom:-8px !important;',
+    '    left:50% !important; transform:translateX(-50%) scaleY(.5) !important;',
+    '    transform-origin:bottom; width:100vw !important; height:1px;',
+    '    background:var(--md-outline-variant); opacity:.5; }',
     '  .miot-page > .player-toolbar > .toolbar-field {',
     '    flex:1 1 auto !important; width:auto !important; min-width:0 !important; }',
-    /* 三个控件同高：歌单框与两个 44px 圆形按钮完全一致；
-       展开搜索框用 inset:0 铺满工具行，高度自动跟着变成 44px */
+    /* 三个控件同高：歌单框与两个 40px 圆形按钮完全一致；
+       展开搜索框用 inset:0 铺满工具行，高度自动跟着变成 40px */
     '  .miot-page > .player-toolbar > .toolbar-field .sl-select-trigger {',
-    '    height:44px !important; min-height:44px !important; max-height:44px !important;',
+    '    height:40px !important; min-height:40px !important; max-height:40px !important;',
     '    border-radius:999px !important; }',
     /* 「继续播放」→ 只留图标的圆形按钮 */
     '  .miot-page > .player-toolbar > .sl-button {',
-    '    flex:0 0 44px !important; width:44px !important;',
-    '    min-width:44px !important; max-width:44px !important;',
-    '    height:44px !important; min-height:44px !important;',
+    '    flex:0 0 40px !important; width:40px !important;',
+    '    min-width:40px !important; max-width:40px !important;',
+    '    height:40px !important; min-height:40px !important;',
     '    padding:0 !important; margin:0 !important;',
     '    border-radius:50% !important; overflow:hidden; }',
     '  .miot-page > .player-toolbar > .sl-button .sl-button-label { display:none !important; }',
-    '  .miot-page > .player-toolbar > .sl-button .sl-icon { font-size:22px !important; }',
-    /* 搜索 → 44px 圆形按钮，默认折叠为放大镜 */
+    '  .miot-page > .player-toolbar > .sl-button .sl-icon { font-size:20px !important; }',
+    /* 搜索 → 40px 圆形按钮，默认折叠为放大镜 */
     '  .miot-page > .player-toolbar > .search-bar {',
-    '    flex:0 0 44px !important; width:44px !important; height:44px !important;',
+    '    flex:0 0 40px !important; width:40px !important; height:40px !important;',
     '    min-width:0 !important; margin:0 !important; padding:0 !important;',
     '    border-radius:50% !important; justify-content:center;',
     '    overflow:hidden; cursor:pointer; }',
     '  .miot-page > .player-toolbar > .search-bar > :not(:first-child) {',
     '    display:none !important; }',
     '  .miot-page > .player-toolbar > .search-bar > :first-child {',
-    '    font-size:22px !important; flex:none; }',
+    '    font-size:20px !important; flex:none; }',
     /* iOS 在 input 字号 <16px 时聚焦会自动放大页面，锁死 16px */
     '  .miot-page .search-bar input { font-size:16px !important; }',
-    /* 展开后铺满整行：不再偏上，也不会露出下层的歌单框底边 */
+    /* 二级页：搜索框保持胶囊形状 fixed 在左上，取消按钮独立 fixed 到右侧，
+       结果面板铺满其下方；三者用同一组关键帧从左滑入（像页面 push 进来的动效）。 */
+    '  body.pt-search-mode { overflow:hidden !important; }',
     '  .miot-page > .player-toolbar > .search-bar.pt-open {',
-    '    position:absolute !important; top:0 !important; bottom:0 !important;',
-    '    left:0 !important; right:0 !important; width:auto !important;',
-    '    height:auto !important; min-height:0 !important; flex:none !important;',
-    '    margin:0 !important; padding:0 12px !important;',
+    '    position:fixed !important;',
+    '    top:calc(10px + var(--sl-safe-top, 0px)) !important; left:12px !important;',
+    '    right:auto !important; width:calc(100% - 24px - 60px) !important;',
+    '    height:41px !important; min-height:41px !important;',
+    '    min-width:0 !important; margin:0 !important; padding:0 14px !important;',
     '    border-radius:999px !important; align-items:center;',
-    '    justify-content:flex-start; overflow:hidden; z-index:20; cursor:default;',
+    '    justify-content:flex-start; overflow:visible; z-index:141 !important;',
+    '    cursor:default; gap:8px;',
     '    background:var(--md-surface-container-lowest, var(--md-surface)) !important;',
-    '    box-shadow:0 4px 16px #0002; }',
+    '    border:1px solid var(--md-outline-variant) !important;',
+    '    box-shadow:0 2px 10px #0001;',
+    '    animation:pt-search-slide-in .28s cubic-bezier(.2,.8,.2,1) both; }',
     '  .miot-page > .player-toolbar > .search-bar.pt-open > :not(:first-child) {',
     '    display:flex !important; }',
     '  .miot-page > .player-toolbar > .search-bar.pt-open > input {',
     '    display:block !important; flex:1 !important; min-width:0; }',
-    /* 展开期间直接隐藏下层控件，杜绝任何透出 */
-    '  .miot-page > .player-toolbar.pt-search-open > .toolbar-field,',
-    '  .miot-page > .player-toolbar.pt-search-open > .sl-button {',
-    '    visibility:hidden !important; }',
+    /* 取消按钮：胶囊右侧、独立 fixed，带描边，随二级页一起滑入 */
+    '  .pt-search-cancel {',
+    '    position:fixed !important; display:none !important;',
+    '    top:calc(10px + var(--sl-safe-top, 0px)) !important; right:12px !important;',
+    '    z-index:141 !important;',
+    '    height:41px !important; min-height:41px !important; min-width:60px !important;',
+    '    padding:0 12px !important;',
+    '    border:1px solid var(--md-outline-variant) !important;',
+    '    border-radius:999px !important;',
+    '    background:var(--md-surface, #fff) !important;',
+    '    color:var(--md-primary, #7c4dff) !important; font-size:14px !important;',
+    '    font-weight:700 !important;',
+    '    line-height:1 !important; appearance:none !important;',
+    '    align-items:center; justify-content:center;',
+    '    white-space:nowrap; cursor:pointer; }',
+    '  body.pt-search-mode .pt-search-cancel {',
+    '    display:inline-flex !important;',
+    '    animation:pt-search-slide-in .28s cubic-bezier(.2,.8,.2,1) both; }',
+    /* 二级页：结果面板顶栏下方铺满到屏幕底部（覆盖 placePanel 的行内定位） */
+    '  body.pt-search-mode .pt-search-panel {',
+    '    top:calc(64px + var(--sl-safe-top, 0px)) !important; bottom:0 !important;',
+    '    left:0 !important; right:0 !important;',
+    '    width:100% !important; height:auto !important; max-height:none !important;',
+    '    border:0 !important; border-radius:0 !important; box-shadow:none !important;',
+    '    background:var(--md-surface, #fff) !important; z-index:135 !important;',
+    '    animation:pt-search-fade-in .3s ease both; }',
     '}',
+
+    /* 方案A（全端，含电脑端）：把第二栏 AppBar 整栏收起，功能并入工具栏菜单。
+       宿主应用层是第一栏（飞牛原生，动不了），这里只收我们自己那条 AppBar。
+       2026-11-24：电脑端也采用此样式；菜单按钮图标换成状态灯前的紫色 miot 图标。 */
+    '.miot-page > .player-toolbar { position:relative !important; }',
+    '.miot-main-appbar { display:none !important; }',
+    '.miot-page { padding-top:calc(10px + var(--sl-safe-top, 0px)) !important; }',
+    '.miot-page > .player-toolbar > #pt-more {',
+    '  flex:0 0 40px !important; width:40px !important; height:40px !important;',
+    '  min-width:40px !important; max-width:40px !important;',
+    '  padding:0 !important; margin:0 !important; border-radius:50% !important;',
+    '  border:1px solid var(--md-outline) !important;',
+    '  background:var(--md-surface-container-low) !important;',
+    '  color:var(--md-on-surface) !important;',
+    /* 图标在圆形底内水平+垂直居中 */
+    '  display:flex !important; align-items:center !important;',
+    '  justify-content:center !important; line-height:1 !important; }',
+    '.miot-page > .player-toolbar > #pt-more svg { width:20px; height:20px; display:block; }',
+    /* 紫色 miot 图标（PNG）作为菜单按钮图标，与状态灯前那个一致；缩小 20% */
+    '.miot-page > .player-toolbar > #pt-more img { width:17.6px; height:17.6px;',
+    '  display:block; object-fit:contain; pointer-events:none; }',
+    ':root[data-theme="dark"] .miot-page > .player-toolbar > #pt-more img {',
+    '  filter:brightness(1.3); }',
+    '#pt-more-menu { position:absolute; top:calc(100% + 6px); right:0;',
+    '  z-index:220; min-width:188px; padding:6px;',
+    '  border:1px solid var(--md-outline-variant); border-radius:14px;',
+    '  background:var(--md-surface-container-lowest, var(--md-surface));',
+    '  box-shadow:0 8px 22px #0003; display:none; }',
+    '#pt-more-menu.pt-open { display:block; }',
+    '#pt-more-menu .pt-menu-status { display:flex; align-items:center;',
+    '  padding:6px 12px 10px; margin-bottom:4px;',
+    '  border-bottom:1px solid var(--md-outline-variant); }',
+    /* 状态灯行与菜单项共用同一套两列基准：图标列 20px、列间距 12px、左右内边距 12px。
+       这样紫色连接图标的中心 = 菜单图标中心，三个圆点的左缘 = 菜单文字左缘。 */
+    '#pt-more-menu .pt-status { gap:12px; }',
+    '#pt-more-menu .pt-conn { width:20px; height:20px; color:var(--md-on-surface); }',
+    '#pt-more-menu .pt-conn img, #pt-more-menu .pt-conn svg { width:20px; height:20px; }',
+    '#pt-more-menu .pt-dot-sm { top:0; }',
+    '#pt-more-menu .pt-menu-item { display:flex; align-items:center; gap:12px;',
+    '  width:100%; padding:11px 12px; border:0; border-radius:10px;',
+    '  background:transparent; color:var(--md-on-surface);',
+    '  font-size:14px; text-align:left; cursor:pointer; }',
+    '#pt-more-menu .pt-menu-item:active {',
+    '  background:var(--md-surface-container-high, #0001); }',
+    '#pt-more-menu .pt-menu-item svg { width:20px; height:20px; flex:none;',
+    '  stroke:currentColor; stroke-width:1.9; fill:none;',
+    '  stroke-linecap:round; stroke-linejoin:round; }',
 
     /* ===== 触屏按压反馈：去掉灰色遮罩，改为按下时图标变主题色 ===== */
     '@media (max-width:719px), (hover:none) {',
     /* iOS / WKWebView 点击时默认的半透明蓝灰高亮块 */
     '  button, .sl-button, .icon-button, .btn-icon, .search-bar, [role="button"] {',
     '    -webkit-tap-highlight-color:transparent !important; }',
-    /* 触屏点按会残留 sticky :hover，M3 原规则由此留下一层灰色圆底 */
-    '  .sl-button:hover:not(:disabled):not(.bar-play-primary):not(.control-primary),',
+    /* 触屏点按会残留 sticky :hover，M3 原规则由此留下一层灰色圆底；
+       实心/色调按钮本身靠背景色表意，必须排除，否则点完后背景被 !important 清成透明 */
+    '  .sl-button:hover:not(:disabled):not(.bar-play-primary):not(.control-primary):not(.sl-button-filled):not(.sl-button-tonal),',
     '  .sl-button-text:hover:not(:disabled),',
-    '  .player-bar .sl-button:hover:not(:disabled):not(.bar-play-primary):not(.control-primary),',
+    '  .player-bar .sl-button:hover:not(:disabled):not(.bar-play-primary):not(.control-primary):not(.sl-button-filled):not(.sl-button-tonal),',
     '  .icon-button:hover, .btn-icon:hover {',
     '    background:transparent !important; box-shadow:none !important; }',
     /* 主播放键是紫底白图标，保持底板，按下时改浅紫底 + 紫图标 */
@@ -237,18 +410,29 @@
 
     /* ===== 手机档（<600）：避开屏幕圆角 / homebar ===== */
     '@media (max-width:599px) {',
-    /* 列表 20px 底部留白、播放条、播放条下方留白统一 #f8f8fc */
-    '  .miot-page.miot-page-with-player {',
+    /* 列表本身保持原样（白底），只有播放条下方那条 homebar 填充区跟随横条专辑色。
+       切勿给 .miot-page 整页铺渐变——会把整个歌曲列表都染色。 */ '  .miot-page.miot-page-with-player {',
     '    padding-bottom:20px !important;',
     '    background-image:linear-gradient(to bottom, transparent calc(100% - 20px),',
     '      var(--pt-bar-bg) calc(100% - 20px)) !important; }',
     '  .player-bar-shell {',
-    '    bottom:calc(20px + var(--sl-safe-bottom, 0px)) !important;',
-    '    background:var(--pt-bar-bg) !important; }',
+    '    bottom:calc(20px + var(--sl-safe-bottom, 0px)) !important; }',
+    /* 底部填充层：与横条同款专辑色切片，palette 变量由 PlayerBar 同步到 :root。
+       ::after 底边贴视口底、横条底边在其上方 20px+safe，两者 background-position
+       统一用 center bottom 各自贴自身盒底，色带衔接处颜色连续。 */
     '  .miot-page.miot-page-with-player::after { content:""; position:fixed;',
     '    left:0; right:0; bottom:0;',
     '    height:calc(20px + var(--sl-safe-bottom, 0px));',
-    '    background:var(--pt-bar-bg); z-index:85; pointer-events:none; }',
+    '    background-image:',
+    '      linear-gradient(var(--pt-bar-tint), var(--pt-bar-tint)),',
+    '      radial-gradient(circle at 14% 10%, var(--player-palette-vibrant, rgb(230,227,247)) 0%, transparent 52%),',
+    '      radial-gradient(circle at 88% 24%, var(--player-palette-dominant, rgb(230,227,247)) 0%, transparent 58%),',
+    '      linear-gradient(155deg, var(--player-palette-dominant, rgb(230,227,247)),',
+    '        var(--player-palette-dark, rgb(230,227,247))) !important;',
+    '    background-size:100% 100%, 100vw 100vh, 100vw 100vh, 100vw 100vh !important;',
+    '    background-position:center bottom !important;',
+    '    background-repeat:no-repeat !important;',
+    '    z-index:85; pointer-events:none; }',
     '  .fullscreen-controls-mobile .control-primary.sl-button {',
     '    width:60px !important; height:60px !important; min-height:60px !important; }',
     '  .fullscreen-controls-mobile .control-primary.sl-button .sl-icon {',
@@ -261,8 +445,25 @@
     '}',
     '@media (max-width:599px) and (max-height:650px) {',
     '  .fullscreen-layout {',
-    '    padding-bottom:calc(224px + var(--sl-safe-bottom, 0px)) !important; }',
+    '    padding-bottom:calc(222px + var(--sl-safe-bottom, 0px)) !important; }',
     '}',
+
+    /* ===== 手机端搜索二级页：全屏遮罩 + 取消按钮 ===== */
+    /* 二级页从左侧滑入的关键帧（搜索框胶囊 / 取消按钮 / 结果面板共用） */
+    '@keyframes pt-search-slide-in {',
+    '  from { transform:translateX(-100%); opacity:.4; }',
+    '  to { transform:translateX(0); opacity:1; }',
+    '}',
+    '@keyframes pt-search-fade-in {',
+    '  from { opacity:0; }',
+    '  to { opacity:1; }',
+    '}',
+    /* 遮罩 append 到 body（不在 #app 内），不会触发 MutationObserver→mount 循环 */
+    '.pt-search-mask { position:fixed; inset:0; z-index:130; display:none;',
+    '  background:var(--md-surface, #fff); }',
+    '.pt-search-mask.show { display:block; }',
+    /* 取消按钮默认隐藏；仅手机端二级页展开态显示（见下方 media 规则） */
+    '.pt-search-cancel { display:none !important; }',
 
     /* ===== 飞牛音乐搜索结果面板（点击即播） ===== */
     '.pt-search-panel { position:fixed; z-index:120; display:none;',
@@ -294,6 +495,24 @@
     '.pt-search-empty { padding:20px 14px; text-align:center;',
     '  color:var(--md-on-surface-variant); }',
     '.miot-page.pt-searching .song-list { opacity:.35; pointer-events:none; }',
+    /* 电脑端：在线结果内联到本地列表下方（普通文档流），并预留滚动条槽位，
+       避免面板显示/隐藏时页面宽度变化导致左右跳动。搜索时列表容器收缩到内容高度，
+       面板才能紧跟在少量本地结果之后出现在首屏。 */
+    '@media (min-width:720px) {',
+    /* html 滚动条改为不占位：移除 scrollbar-gutter 预留的 10px 槽位。
+       该槽位由浏览器绘制、内容无法覆盖，导致工具栏淡紫背景与播放条专辑色
+       在视口右侧被截断露出底色。滚动条不占宽度后，通栏背景铺满整个视口；
+       且页面变长/变短时宽度恒定，搜索面板显示/隐藏不会左右跳动。 */
+    '  html { scrollbar-gutter:auto; scrollbar-width:none; }',
+    '  html::-webkit-scrollbar { display:none; width:0; height:0; }',
+    '  .pt-search-panel { position:static !important; z-index:auto !important;',
+    '    width:auto !important; max-height:none !important;',
+    '    margin:12px 0 0 !important; overflow:visible !important;',
+    '    border:1px solid var(--md-outline-variant) !important;',
+    '    border-radius:16px !important; box-shadow:none !important; }',
+    '  .miot-page.pt-searching .song-list { opacity:1 !important; pointer-events:auto !important; }',
+    '  .miot-page.pt-searching .sl-list-view { height:auto !important; overflow:visible !important; }',
+    '}',
   ].join('\n');
 
   var style = document.createElement('style');
@@ -329,8 +548,9 @@
   })();
 
   /* ------------------------------------------------------------------ 图标 */
-  var ICON_SUN = '<circle cx="12" cy="12" r="4"></circle>'
-    + '<path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>';
+  var ICON_SUN = '<circle cx="12" cy="12" r="5"></circle>'
+    + '<path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41'
+    + 'M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path>';
   var ICON_MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>';
 
   function svgEl(paths, id) {
@@ -348,12 +568,13 @@
   var connEl = document.createElement('span');
   connEl.className = 'pt-conn';
   connEl.id = 'pt-conn';
-  // 不设 title：图标不要悬停提示；img 不吃指针事件，避免任何 tooltip
-  var connImg = document.createElement('img');
-  connImg.src = CONN_PNG;
-  connImg.alt = '';
-  connImg.setAttribute('aria-hidden', 'true');
-  connEl.appendChild(connImg);
+  // 音箱图标：与设置页「设备」项同款，内联 SVG + currentColor 填充，
+  // 颜色随主题跟随 --md-on-surface，和菜单下方四个图标一致。不设 title，不吃指针事件。
+  var connSvgWrap = document.createElement('span');
+  connSvgWrap.setAttribute('aria-hidden', 'true');
+  connSvgWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" '
+    + 'stroke="none" aria-hidden="true"><path d="' + SPEAKER_PATHS + '"></path></svg>';
+  connEl.appendChild(connSvgWrap.firstChild);
   statusEl.appendChild(connEl);
   function newDot(id, tip) {
     var d = document.createElement('span');
@@ -391,6 +612,100 @@
   }
   toastEl.addEventListener('click', function () { toastEl.classList.remove('show'); });
 
+  /* ------------------------------------------ 手机端工具行 ⋮ 菜单（方案A）
+     把原第二栏 AppBar 的设备/刷新/设置/主题四项收进一个圆形 ⋮ 按钮。
+     菜单项点击时直接 .click() 原 AppBar 里的 Vue 按钮，复用其事件处理；
+     主题项直接触发 themeEl。状态灯 statusEl 也会在 mount() 里移到菜单顶部。 */
+  var ICON_MORE = '<circle cx="12" cy="5" r="1.6" fill="currentColor" stroke="none">'
+    + '</circle><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none">'
+    + '</circle><circle cx="12" cy="19" r="1.6" fill="currentColor" stroke="none"></circle>';
+  var ICON_DEVICE = '<rect x="3" y="4" width="15" height="16" rx="2"></rect>'
+    + '<path d="M20 9v6M6 8h6M6 12h6M6 15h4"></path>';
+  var ICON_REFRESH = '<path d="M21 12a9 9 0 1 1-2.64-6.36"></path>'
+    + '<path d="M21 3v6h-6"></path>';
+  var ICON_SETTINGS = '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25'
+    + 'a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1'
+    + 'a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38'
+    + 'a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44'
+    + 'a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73'
+    + 'l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09'
+    + 'a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25'
+    + 'a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>'
+    + '<circle cx="12" cy="12" r="3"></circle>';
+
+  var moreBtn = document.createElement('button');
+  moreBtn.type = 'button';
+  moreBtn.id = 'pt-more';
+  moreBtn.className = 'pt-more-btn';
+  moreBtn.setAttribute('aria-label', '更多操作');
+  moreBtn.setAttribute('aria-expanded', 'false');
+  moreBtn.title = '更多操作';
+  // 图标换成状态灯前那个紫色 miot 图标（与连接图标同源），不再用三个点
+  var moreImg = document.createElement('img');
+  moreImg.src = CONN_PNG;
+  moreImg.alt = '';
+  moreImg.setAttribute('aria-hidden', 'true');
+  moreBtn.appendChild(moreImg);
+
+  var moreMenu = document.createElement('div');
+  moreMenu.id = 'pt-more-menu';
+  moreMenu.className = 'pt-more-menu';
+  moreMenu.setAttribute('role', 'menu');
+  var menuStatus = document.createElement('div');
+  menuStatus.className = 'pt-menu-status';
+  moreMenu.appendChild(menuStatus);
+  function addMenuItem(act, iconPaths, label) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pt-menu-item';
+    b.setAttribute('role', 'menuitem');
+    b.setAttribute('data-act', act);
+    b.appendChild(svgEl(iconPaths, 'pt-menuitem-icon-' + act));
+    var t = document.createElement('span');
+    t.textContent = label;
+    b.appendChild(t);
+    moreMenu.appendChild(b);
+  }
+  addMenuItem('theme', ICON_SUN, '切换主题');
+  addMenuItem('device', ICON_DEVICE, '选择设备');
+  addMenuItem('refresh', ICON_REFRESH, '刷新');
+  addMenuItem('settings', ICON_SETTINGS, '设置');
+
+  function setToolbarMenuOpen(open) {
+    var tb = moreBtn.closest ? moreBtn.closest('.player-toolbar') : null;
+    if (tb) tb.classList.toggle('pt-menu-open', open);
+  }
+  function closeMoreMenu() {
+    moreMenu.classList.remove('pt-open');
+    setToolbarMenuOpen(false);
+    moreBtn.setAttribute('aria-expanded', 'false');
+  }
+  moreBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    var open = !moreMenu.classList.contains('pt-open');
+    moreMenu.classList.toggle('pt-open', open);
+    setToolbarMenuOpen(open);
+    moreBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  moreMenu.addEventListener('click', function (e) {
+    var item = e.target.closest ? e.target.closest('.pt-menu-item') : null;
+    if (!item) return;
+    e.stopPropagation();
+    var act = item.getAttribute('data-act');
+    if (act === 'theme') {
+      themeEl.click();
+    } else {
+      var titleMap = { device: '选择设备', refresh: '刷新', settings: '设置' };
+      var btn = document.querySelector('.miot-main-appbar .appbar-actions [title="' + titleMap[act] + '"]');
+      if (btn) btn.click();
+    }
+    closeMoreMenu();
+  });
+  document.addEventListener('pointerdown', function (e) {
+    if (!moreMenu.classList.contains('pt-open')) return;
+    if (moreBtn.contains(e.target) || moreMenu.contains(e.target)) return;
+    closeMoreMenu();
+  }, true);
 
   /* ================================================ 飞牛音乐搜索（与语音点播同源）
      后端 /compat/library-search?full=1 调的是 music.searchSongs()，也就是上午
@@ -419,13 +734,21 @@
     return document.querySelector('.miot-page > .player-toolbar > .search-bar');
   }
   function placePanel(bar) {
-    var r = bar.getBoundingClientRect();
     var small = window.innerWidth < 720;
-    var w = small ? Math.max(240, window.innerWidth - 24) : 380;
+    // 电脑端面板内联在本地列表下方（普通文档流），不要行内 fixed 定位残留
+    if (!small) {
+      panel.style.removeProperty('left');
+      panel.style.removeProperty('top');
+      panel.style.removeProperty('width');
+      panel.style.removeProperty('max-height');
+      return;
+    }
+    var r = bar.getBoundingClientRect();
+    var w = Math.max(240, window.innerWidth - 24);
     w = Math.min(w, window.innerWidth - 16);
-    var left = small ? 12 : Math.min(r.left, window.innerWidth - w - 8);
+    var left = 12;
     var top = Math.max(8, r.bottom + 6);
-    var maxH = Math.max(160, window.innerHeight - top - (small ? 96 : 84));
+    var maxH = Math.max(160, window.innerHeight - top - 96);
     panel.style.left = Math.max(8, left) + 'px';
     panel.style.top = top + 'px';
     panel.style.width = w + 'px';
@@ -454,7 +777,12 @@
     fetchJson(apiUrl('/compat/library-search?q=' + encodeURIComponent(q) + '&full=1'))
       .then(function (d) {
         if (seq !== searchSeq) return;
-        searchResults = (d && d.songs) || [];
+        // 桌面端上方原生列表已有带封面的本地匹配，面板只留在线音源避免重复；
+        // 手机端原生列表不展示本地匹配，这里保留接口返回的本地歌曲。
+        var rows = (d && d.songs) || [];
+        searchResults = isPhoneWidth() ? rows : rows.filter(function (s) {
+          return !!(s && s.is_online);
+        });
         renderResults(d);
       })
       .catch(function (e) {
@@ -465,11 +793,13 @@
   }
   function renderResults(d) {
     var n = searchResults.length;
-    var online = d && d.online ? '（在线 ' + d.online + '）' : '';
+    var phone = isPhoneWidth();
+    var online = phone && d && d.online ? '（在线 ' + d.online + '）' : '';
     var head = '<div class="pt-search-head">飞牛音乐 · ' + n + ' 首'
       + online + ' · 点击即播</div>';
     if (!n) {
-      panel.innerHTML = head + '<div class="pt-search-empty">没有匹配的歌曲</div>';
+      panel.innerHTML = head + '<div class="pt-search-empty">'
+        + (phone ? '没有匹配的歌曲' : '没有匹配的在线歌曲') + '</div>';
       return;
     }
     var html = [head];
@@ -494,11 +824,21 @@
         var t = firstDevice(d && d.data);
         if (!t.device) throw new Error('没有可用的智能音箱');
         var id = t.device.deviceID || t.device.deviceId;
-        return fetch(apiUrl('/mina/play-url'), {
+        // 走 /player/play-online：把歌曲加载进播放队列再推流，音箱播放的 URL 不变，
+        // 但 /player/status 的 current_song 会同步更新，下方播放器信息跟着变。
+        return fetch(apiUrl('/player/play-online'), {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ account_id: t.account, device_id: id, url: s.play_url }),
+          body: JSON.stringify({
+            account_id: t.account,
+            device_id: id,
+            url: s.play_url,
+            title: s.title || '',
+            artist: s.artist || '',
+            cover_url: s.cover_url || s.cover || '',
+            duration: s.duration || 0,
+          }),
         }).then(function (r) { return r.json(); });
       })
       .then(function (r) {
@@ -542,10 +882,16 @@
     if (!panel.classList.contains('show')) return;
     if (panel.contains(t)) return;
     if (bar && (bar === t || bar.contains(t))) return;
+    // 桌面端在线结果已内联在本地列表下方，属于页面内容的一部分：点空白处
+    // 不该让它消失（只有清空搜索词才收起）。手机端二级页仍按「点外部收起」处理。
+    if (!isPhoneWidth()) return;
     hidePanel();
   }, true);
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') hidePanel();
+    if (e.key !== 'Escape') return;
+    hidePanel();
+    // 二级页展开时，Escape 也收起二级页回到上一级（与「取消」按钮等价）
+    if (searchOpen) closeSearchPage(isPhoneWidth());
   });
   window.addEventListener('resize', function () {
     if (!panel.classList.contains('show')) return;
@@ -554,6 +900,8 @@
   });
   window.addEventListener('scroll', function () {
     if (!panel.classList.contains('show')) return;
+    // 电脑端面板已内联在列表下方，随文档正常滚动，不做悬浮层的滚动收起
+    if (!isPhoneWidth()) return;
     var bar = searchBarEl();
     if (!bar || bar.getBoundingClientRect().bottom < 48) { hidePanel(); return; }
     placePanel(bar);
@@ -564,6 +912,32 @@
   var lastCtlW = 168;
   var lastWidthApplied = 0;
   var searchOpen = false;
+
+  // 手机端搜索二级页的全屏遮罩：盖住主界面，点遮罩空白＝点外部，走下方收起逻辑。
+  // append 到 body（不在 #app 内），避免被 MutationObserver→mount 观察到而形成循环。
+  var searchMask = document.createElement('div');
+  searchMask.className = 'pt-search-mask';
+  searchMask.id = 'pt-search-mask';
+  (document.body || document.documentElement).appendChild(searchMask);
+
+  // 二级页「取消」按钮：独立挂 body（不能放进带 transform 动画的搜索框，
+  // 否则它的 fixed 定位会被 transform 劫持）。只在手机端二级页显示。
+  var cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'pt-search-cancel';
+  cancelBtn.id = 'pt-search-cancel';
+  cancelBtn.textContent = '取消';
+  cancelBtn.setAttribute('aria-label', '取消搜索');
+  cancelBtn.addEventListener('click', function (e) {
+    if (e.stopPropagation) e.stopPropagation();
+    if (e.preventDefault) e.preventDefault();
+    closeSearchPage(true);
+  });
+  (document.body || document.documentElement).appendChild(cancelBtn);
+
+  function isPhoneWidth() {
+    return !!(window.matchMedia && window.matchMedia('(max-width: 719px)').matches);
+  }
 
   function syncSearchWidth(toolbar) {
     // 桌面搜索框宽度固定 240px（原 120px 加倍）；「继续播放」已是 44px 圆钮，
@@ -580,22 +954,59 @@
     }
   }
 
-  /* 手机端折叠的圆形搜索按钮：点一下展开成整行输入框，点外面收起 */
+  /* 手机端：点圆形搜索按钮进入全屏二级页；桌面端：仅保持搜索框常驻。
+     applySearchState 统一维护展开态 class + 遮罩 + body 标记，二者互斥不会串到桌面。 */
   function applySearchState(focus) {
     var s = document.querySelector('.miot-page .search-bar');
     var tb = s ? (s.closest ? s.closest('.player-toolbar') : s.parentNode) : null;
+    var phone = isPhoneWidth();
+    // pt-open / pt-search-open 两端通用（bindSearch 的点击判断依赖 pt-open），桌面端行为不变
     if (s) s.classList.toggle('pt-open', searchOpen);
     if (tb) tb.classList.toggle('pt-search-open', searchOpen);
+    // 遮罩与 body 标记只在手机端生效，桌面端搜索框常驻、不受影响
+    if (searchMask) searchMask.classList.toggle('show', searchOpen && phone);
+    if (document.body) document.body.classList.toggle('pt-search-mode', searchOpen && phone);
     if (searchOpen && focus) {
       var inp = s && s.querySelector('input');
       if (inp) setTimeout(function () { try { inp.focus(); } catch (e) { /* ignore */ } }, 0);
     }
   }
+  /* 关闭二级页（取消 / 放大镜 / 点外部 / Escape 共用）：
+     除了收起页面、收回软键盘，还要清空输入与上次搜索结果，避免下次进来残留旧内容。
+     输入清空用原生 input 事件回写，让 SlInput 触发 update:modelValue 同步 Vue 的
+     state.songSearch，否则 Vue 重渲染会把值填回去。 */
+  function closeSearchPage(clearSession) {
+    // 清空输入与结果：取消按钮 / 手机端各关闭路径需要；桌面端只收起、不清空。
+    if (clearSession) {
+      var s = document.querySelector('.miot-page .search-bar');
+      var inp = s && s.querySelector('input');
+      if (inp) {
+        try { inp.blur(); } catch (err) { /* ignore */ }
+        inp.value = '';
+        try { inp.dispatchEvent(new Event('input', { bubbles: true })); } catch (err) { /* ignore */ }
+      }
+      clearTimeout(searchTimer);
+      searchSeq++;
+      searchResults = [];
+      if (panel) panel.innerHTML = '';
+    }
+    hidePanel();
+    searchOpen = false;
+    applySearchState(false);
+  }
   function bindSearch(search) {
     if (search.getAttribute('data-pt-bound')) return;
     search.setAttribute('data-pt-bound', '1');
-    search.addEventListener('click', function () {
-      if (search.classList.contains('pt-open')) return;
+    search.addEventListener('click', function (e) {
+      if (search.classList.contains('pt-open')) {
+        // 展开态：再点第一个子元素（放大镜图标）即收起，输入框失焦以收回软键盘。
+        // 点输入框内容区 / 清除 / 定位按钮不收起，交给各自逻辑处理。
+        var first = search.firstElementChild;
+        if (first && (e.target === first || first.contains(e.target))) {
+          closeSearchPage(true);
+        }
+        return;
+      }
       searchOpen = true;
       applySearchState(true);
       setTimeout(function () {
@@ -606,10 +1017,26 @@
   }
   document.addEventListener('click', function (e) {
     if (!searchOpen) return;
+    // 取消按钮独立挂在 body 上，由它自己的 handler 处理（含清空），这里必须放行
+    if (cancelBtn && (e.target === cancelBtn || cancelBtn.contains(e.target))) return;
     var s = document.querySelector('.miot-page .search-bar');
     if (s && (e.target === s || s.contains(e.target))) return;
-    searchOpen = false;
-    applySearchState(false);
+    // 搜索结果浮层属于搜索功能本身，点这里是要点歌，不能被当成「点外面」吞掉
+    if (panel && panel.contains(e.target)) return;
+    var isPhone = !!(window.matchMedia
+      && window.matchMedia('(max-width: 719px)').matches);
+    // 桌面端搜索框常驻、在线结果内联成页面内容：点外部只退出展开态，
+    // 绝不 hidePanel（否则在线结果消失、再点搜索框又重现）。
+    if (!isPhone) {
+      searchOpen = false;
+      applySearchState(false);
+      return;
+    }
+    // 手机端：点搜索框以外任何地方，收起并清空会话，同时吞掉这一次点击，
+    // 避免连带激活被点元素的原有功能（播放/切歌/打开面板等）。
+    closeSearchPage(true);
+    if (e.preventDefault) e.preventDefault();
+    if (e.stopPropagation) e.stopPropagation();
   }, true);
 
   function handleChatActivity() {
@@ -621,40 +1048,57 @@
   }
 
   function mount() {
-    var appbar = document.querySelector('.miot-main-appbar');
-    // 设置页 / 全屏播放页没有这条应用栏，什么都不显示
-    if (appbar) {
-      var subtitle = appbar.querySelector('.miot-appbar-subtitle');
-      if (subtitle && (!statusEl.isConnected || statusEl.parentNode !== subtitle.parentNode)) {
-        subtitle.parentNode.insertBefore(statusEl, subtitle.nextSibling);
-      }
-      var actions = appbar.querySelector('.appbar-actions');
-      if (actions && (!themeEl.isConnected || themeEl.parentNode !== actions)) {
-        // 追加为最后一个子元素 + CSS order:-1 => 排在「选择设备」之前，
-        // 且不改变原生按钮的 nth-child 序号（小屏断点会隐藏第 2 个按钮）。
-        actions.appendChild(themeEl);
-      }
+    var toolbar = document.querySelector('.miot-page > .player-toolbar');
+    // 设置页 / 全屏播放页没有工具行：不挂按钮、不显示状态灯。
+    if (!toolbar) {
+      closeMoreMenu();
+      return;
     }
 
-    // 搜索栏原本是 .miot-page 的独立一行，搬到工具行末尾（幂等）。
-    var toolbar = document.querySelector('.miot-page > .player-toolbar');
+    // 状态灯全端进菜单顶部（AppBar 在手机/电脑端都已隐藏）。
+    if (statusEl.parentNode !== menuStatus) menuStatus.appendChild(statusEl);
+
+    // 搜索结果面板：电脑端内联到本地歌曲列表容器的末尾（普通文档流，紧跟列表），
+    // 手机端留在 body 配合二级页遮罩。Vue 会重渲染 .song-list，故每次 mount 幂等纠正。
+    var songList = document.querySelector('.miot-page .song-list');
+    if (!isPhoneWidth() && songList) {
+      if (panel.parentNode !== songList || panel !== songList.lastElementChild) {
+        songList.appendChild(panel);
+      }
+    } else {
+      var body = document.body || document.documentElement;
+      if (panel.parentNode !== body) body.appendChild(panel);
+    }
+
+    // 搜索栏原本是 .miot-page 的独立一行，搬到工具行（幂等，避免重复绑定/失焦）。
     var search = document.querySelector('.miot-page .search-bar');
-    if (toolbar && search) {
+    if (search) {
       if (search.parentNode !== toolbar) toolbar.appendChild(search);
       syncSearchWidth(toolbar);
       clearPlaceholder(search);
       bindSearch(search);
       applySearchState(false);
     }
+
+    // 菜单按钮 + 菜单挂到工具行，紧跟在搜索框后面（手机 / 电脑端统一）。
+    if (moreBtn.parentNode !== toolbar) toolbar.appendChild(moreBtn);
+    if (moreMenu.parentNode !== toolbar) toolbar.appendChild(moreMenu);
+    if (search && search.parentNode === toolbar) {
+      if (search.nextElementSibling !== moreBtn) {
+        toolbar.insertBefore(moreBtn, search.nextSibling);
+      }
+      if (moreBtn.nextElementSibling !== moreMenu) {
+        toolbar.insertBefore(moreMenu, moreBtn.nextSibling);
+      }
+    }
+
     // 「继续播放」圆钮移到歌单选择框之前。Vue 的 v-if 锚点会把它插回
     // .toolbar-field 之后，所以每次 mount 都幂等纠正一次；桌面 / 手机端
-    // 统一为「继续播放 / 歌单选择器 / 搜索」。
-    if (toolbar) {
-      var resume = toolbar.querySelector(':scope > .sl-button');
-      var field = toolbar.querySelector(':scope > .toolbar-field');
-      if (resume && field && field.previousElementSibling !== resume) {
-        toolbar.insertBefore(resume, field);
-      }
+    // 统一为「继续播放 / 歌单选择器 / 搜索 / 菜单按钮」。
+    var resume = toolbar.querySelector(':scope > .sl-button');
+    var field = toolbar.querySelector(':scope > .toolbar-field');
+    if (resume && field && field.previousElementSibling !== resume) {
+      toolbar.insertBefore(resume, field);
     }
     handleChatActivity();
   }

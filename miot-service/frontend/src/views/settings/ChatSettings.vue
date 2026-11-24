@@ -5,7 +5,7 @@ import type { ConnectionTestResult } from '../../../../src/chat/connection_test'
 import type { ChatConfig, ChatMemory, ChatTurn } from '../../../../src/chat/types';
 import { isDashScopeEndpoint } from '../../../../src/utils/ai_url';
 import { del, get, messageOf, post, put, query } from '../../api';
-import { confirmAction, deviceId, deviceName, managedDevices, notify, saveConfig, selectDevice, state } from '../../store';
+import { confirmAction, deviceId, deviceName, deviceModelSuffix, managedDevices, notify, saveConfig, selectDevice, state } from '../../store';
 import SectionCard from '../../ui/SectionCard.vue';
 import SettingRow from '../../ui/SettingRow.vue';
 import SlInput from '../../ui/SlInput.vue';
@@ -33,6 +33,12 @@ const targetQuery = computed(() => query(target.value));
 const lastContextTurns = ref(3);
 const contextEnabled = computed(() => config.context_turns > 0);
 const webSearchAvailable = computed(() => config.api_protocol === 'responses' || isDashScopeEndpoint(config.connection === 'independent' ? config.api_url : state.config.ai_config.api_url || ''));
+// 获取模型后下拉直接占据输入框位置；把手输的自定义模型并进选项，避免切换时丢失。
+const modelSelectOptions = computed(() => {
+  const options = models.value.map(m => ({ value: m.id, label: m.id }));
+  if (config.model && !options.some(o => o.value === config.model)) options.unshift({ value: config.model, label: `${config.model}（手动输入）` });
+  return options;
+});
 const connectionIdentity = computed(() => JSON.stringify({
   connection: config.connection, api_url: config.api_url, api_key: config.api_key,
   model: config.model, timeout: config.timeout, api_protocol: config.api_protocol,
@@ -55,14 +61,13 @@ async function testConnection(search: boolean) {
     if (current()) connectionTest.value = { connected: false, search: 'not_requested', error: messageOf(e) };
   } finally { connectionTesting.value = false; }
 }
-const dirty = computed(() => loaded.value && (JSON.stringify({ ...config, trigger_words: triggers.value.split(/[、,，\n]/).map(v => v.trim()).filter(Boolean) }) !== savedConfig.value || customHeaders.value !== JSON.stringify(config.custom_headers || {}, null, 2)));
 function setContextEnabled(enabled: boolean) {
   if (!enabled && config.context_turns > 0) lastContextTurns.value = config.context_turns;
   config.context_turns = enabled ? lastContextTurns.value : 0;
 }
 const phases: Record<string, string> = { queued: '排队中', preparing: '接管音箱', generating: '生成回答', speaking: '播报中', resuming: '恢复音乐', completed: '已完成', cancelled: '已取消', failed: '失败', unknown: '播报结束未确认' };
 const deviceSelection = computed(() => JSON.stringify([state.currentAccountId, state.currentDeviceId]));
-const deviceOptions = computed(() => managedDevices.value.map(item => ({ value: JSON.stringify([item.accountId, deviceId(item.device)]), label: `${deviceName(item.device)} · ${item.accountName}` })));
+const deviceOptions = computed(() => managedDevices.value.map(item => ({ value: JSON.stringify([item.accountId, deviceId(item.device)]), label: `${deviceName(item.device)}${deviceModelSuffix(item.device)} · ${item.accountName}` })));
 const phase = computed(() => state.chatStatus ? phases[state.chatStatus.phase] : '空闲');
 const active = computed(() => !!state.chatStatus && ['queued', 'preparing', 'generating', 'speaking', 'resuming'].includes(state.chatStatus.phase));
 
@@ -83,9 +88,8 @@ async function refresh() {
   if (!alive || version !== refreshVersion || identity !== targetQuery.value) return;
   history.value = h.history; total.value = h.total; summary.value = h.summary; memories.value = m.memories;
 }
-// 「启用 AI 对话」等主开关必须切换即落盘。此前它们只是 v-model 本地值，
-// 要滚到页面最底部点「保存设置」才会下发，用户以为关掉了，刷新又读回旧值。
-// 只提交单个字段：后端 saveChatConfig 支持局部更新，不会覆盖同页其它未保存草稿。
+// 三个主开关切换即落盘，不等自动保存的防抖，避免关掉后刷新又读回旧值。
+// 只提交单个字段：后端 saveChatConfig 支持局部更新，不会覆盖其它字段。
 const immediateSaving = ref(false), immediateError = ref('');
 let immediateSeq = 0;
 async function setImmediateFlag(key: 'enabled' | 'require_trigger' | 'bypass_native_commands', value: boolean) {
@@ -97,11 +101,11 @@ async function setImmediateFlag(key: 'enabled' | 'require_trigger' | 'bypass_nat
   try {
     const saved = await put<ChatConfig>('/chat/config', { [key]: value });
     if (seq !== immediateSeq) return;
-    // 只把该字段的服务端权威值同步进基线，保留其它字段的「未保存」状态。
+    // 只把该字段的服务端权威值同步进基线，其它字段继续由自动保存处理。
     const base = JSON.parse(savedConfig.value || '{}') as Record<string, unknown>;
     base[key] = saved[key];
     savedConfig.value = JSON.stringify(base);
-    const labels = { enabled: 'AI 对话', require_trigger: '必须说触发词', bypass_native_commands: '不代答设备控制指令' };
+    const labels = { enabled: 'AI 对话', require_trigger: '必须说触发词', bypass_native_commands: '不抢答设备控制指令' };
     notify(`${labels[key]}已${value ? '开启' : '关闭'}`, 'success');
   } catch (e) {
     if (seq !== immediateSeq) return;
@@ -112,13 +116,57 @@ async function setImmediateFlag(key: 'enabled' | 'require_trigger' | 'bypass_nat
     if (seq === immediateSeq) immediateSaving.value = false;
   }
 }
-async function save() {
-  if (config.connection === 'independent') config.custom_headers = parseAIHeaders(customHeaders.value);
-  config.trigger_words = triggers.value.split(/[、,，\n]/).map(v => v.trim()).filter(Boolean);
-  Object.assign(config, await put<ChatConfig>('/chat/config', config));
-  customHeaders.value = JSON.stringify(config.custom_headers || {}, null, 2);
-  savedConfig.value = JSON.stringify(config);
-  notify('AI 对话设置已保存', 'success');
+// 所有配置项统一自动落盘：变化后短暂防抖再整体提交，不再有手动保存按钮。
+const autoSaveError = ref('');
+let autoTimer: ReturnType<typeof setTimeout> | null = null;
+let autoRunning: Promise<void> | null = null;
+let autoSeq = 0;
+function configSnapshot(): Record<string, unknown> {
+  let headers = config.custom_headers;
+  if (config.connection === 'independent') {
+    try { headers = parseAIHeaders(customHeaders.value); }
+    catch { /* 输入组件已内联提示格式错误，保留上一次有效值，不打断其它字段保存 */ }
+  }
+  return {
+    ...config,
+    trigger_words: triggers.value.split(/[、,，\n]/).map(v => v.trim()).filter(Boolean),
+    custom_headers: headers,
+  };
+}
+function queueAutoSave() {
+  if (!loaded.value) return;
+  if (autoTimer) clearTimeout(autoTimer);
+  autoTimer = setTimeout(() => { autoTimer = null; void performAutoSave(); }, 400);
+}
+async function performAutoSave(): Promise<void> {
+  if (!loaded.value || !alive) return;
+  const payload = configSnapshot();
+  if (JSON.stringify(payload) === savedConfig.value) return;
+  const seq = ++autoSeq;
+  autoSaveError.value = '';
+  const task = (async () => {
+    try {
+      const saved = await put<ChatConfig>('/chat/config', payload);
+      if (!alive || seq !== autoSeq) return;
+      Object.assign(config, saved);
+      triggers.value = config.trigger_words.join('、');
+      customHeaders.value = JSON.stringify(config.custom_headers || {}, null, 2);
+      savedConfig.value = JSON.stringify(config);
+    } catch (e) {
+      if (!alive || seq !== autoSeq) return;
+      autoSaveError.value = `设置保存失败：${messageOf(e)}`;
+      notify(autoSaveError.value, 'error');
+    } finally {
+      if (seq === autoSeq) autoRunning = null;
+    }
+  })();
+  autoRunning = task;
+  await task;
+}
+async function flushAutoSave(): Promise<void> {
+  if (autoTimer) { clearTimeout(autoTimer); autoTimer = null; }
+  if (autoRunning) await autoRunning;
+  await performAutoSave();
 }
 async function submit() {
   await post('/chat/messages', { ...target.value, text: question.value, speak: speak.value });
@@ -158,123 +206,124 @@ watch([
   () => state.chatStatus?.memory_revision,
 ], () => { void refreshSafely(); });
 watch(connectionIdentity, () => { testVersion++; connectionTest.value = null; }, { flush: 'sync' });
-onMounted(() => { void action(async () => { Object.assign(config, await get<ChatConfig>('/chat/config')); triggers.value = config.trigger_words.join('、'); customHeaders.value = JSON.stringify(config.custom_headers || {}, null, 2); savedConfig.value = JSON.stringify(config); lastContextTurns.value = config.context_turns || 3; loaded.value = true; void get<{ streaming: boolean; }>('/chat/capabilities').then(value => { if (alive) streamingAvailable.value = value.streaming; }).catch(() => { }); await refresh(); }); });
+watch([config, triggers, customHeaders], queueAutoSave, { deep: true });
+onMounted(() => { void action(async () => { Object.assign(config, await get<ChatConfig>('/chat/config')); triggers.value = config.trigger_words.join('、'); customHeaders.value = JSON.stringify(config.custom_headers || {}, null, 2); savedConfig.value = JSON.stringify(configSnapshot()); lastContextTurns.value = config.context_turns || 3; loaded.value = true; void get<{ streaming: boolean; }>('/chat/capabilities').then(value => { if (alive) streamingAvailable.value = value.streaming; }).catch(() => { }); await refresh(); }); });
 let alive = true;
-onUnmounted(() => { alive = false; refreshVersion++; });
+onUnmounted(() => { if (autoTimer) void flushAutoSave(); alive = false; refreshVersion++; });
 const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); };
 </script>
 
 <template>
   <fieldset class="chat-settings" :disabled="busy || !loaded">
     <p v-if="error" role="alert" class="chat-error">{{ error }}</p>
-    <SectionCard title="AI 对话" description="与音乐口令分析分别启用。默认须说“请问……”才开始，回答后可继续追问；设备控制指令保留小爱自己的答复。">
+    <SectionCard class="chat-dialog-card" title="AI 对话" icon="record_voice_over">
       <div class="form-body">
-      <SettingRow title="启用 AI 对话" subtitle="切换后立即保存生效，无需点底部「保存设置」。"><SlSwitch :model-value="config.enabled" :disabled="!loaded || busy || immediateSaving" aria-label="启用 AI 对话" @update:model-value="setImmediateFlag('enabled', $event)" /></SettingRow>
+      <SettingRow title="启用 AI 对话"><SlSwitch :model-value="config.enabled" :disabled="!loaded || busy || immediateSaving" aria-label="启用 AI 对话" @update:model-value="setImmediateFlag('enabled', $event)" /></SettingRow>
       <p v-if="immediateSaving" role="status">正在保存开关……</p>
       <p v-if="immediateError" role="alert" class="chat-error">{{ immediateError }}</p>
       <p v-if="!state.config.conversation_monitor_enabled">语音问答需要对话监听。<SlButton label="一并开启监听" variant="outlined" @click="safeAction(async () => { await saveConfig({ conversation_monitor_enabled: true }); })" /></p>
       <label class="chat-field">触发词（用顿号或逗号分隔）<SlInput v-model="triggers" aria-label="问答触发词" /></label>
-      <SettingRow title="必须说触发词" subtitle="没有触发词的语音不会启动 AI；上一轮回答后的追问仍可免触发词。"><SlSwitch :model-value="config.require_trigger" :disabled="!loaded || busy || immediateSaving" aria-label="必须说触发词" @update:model-value="setImmediateFlag('require_trigger', $event)" /></SettingRow>
-      <SettingRow title="不代答设备控制指令" subtitle="开关灯、调空调等已由小爱执行的口令，不再发一份给自定义模型抢答。"><SlSwitch :model-value="config.bypass_native_commands" :disabled="!loaded || busy || immediateSaving" aria-label="不代答设备控制指令" @update:model-value="setImmediateFlag('bypass_native_commands', $event)" /></SettingRow>
+      <SettingRow class="chat-divider-top" title="必须说触发词"><SlSwitch :model-value="config.require_trigger" :disabled="!loaded || busy || immediateSaving" aria-label="必须说触发词" @update:model-value="setImmediateFlag('require_trigger', $event)" /></SettingRow>
+      <SettingRow title="不抢答设备控制指令"><SlSwitch :model-value="config.bypass_native_commands" :disabled="!loaded || busy || immediateSaving" aria-label="不抢答设备控制指令" @update:model-value="setImmediateFlag('bypass_native_commands', $event)" /></SettingRow>
       <SettingRow title="每轮回答后恢复原音乐"><SlSwitch v-model="config.resume_music" aria-label="回答后恢复音乐" /></SettingRow>
-      <SettingRow title="等待时播报提示" subtitle="提问后说“收到，正在思考”，模型请求同时开始。"><SlSwitch v-model="config.waiting_feedback" aria-label="等待时播报提示" /></SettingRow>
-      <p>追问仍需唤醒音箱。分组播放时全组暂停，仅提问设备回答；播报结束无法确认时保持暂停。DLNA 投放中请先停止投放。</p>
+      <SettingRow title="等待时播报提示"><SlSwitch v-model="config.waiting_feedback" aria-label="等待时播报提示" /></SettingRow>
       </div>
     </SectionCard>
-    <SectionCard title="对话上下文" description="聊天记录用于查看；只有开启以下选项才会发送相关历史或偏好。">
+    <SectionCard class="chat-context-card" title="对话上下文" icon="format_list_numbered">
       <div class="form-body">
-        <SettingRow title="携带历史对话" subtitle="让 AI 理解连续追问。关闭后不携带以前的问答和摘要。"><SlSwitch :model-value="contextEnabled" aria-label="携带历史对话" @update:model-value="setContextEnabled($event)" /></SettingRow>
-        <label v-if="contextEnabled" class="chat-field">参考最近几轮（1–24）<SlInput :model-value="String(config.context_turns)" type="number" aria-label="上下文轮数" @update:model-value="config.context_turns = Number($event)" /><small>一轮包含一次提问和回答。</small></label>
-        <SettingRow title="记住我的偏好" subtitle="自动保存并参考个人事实与偏好，会产生额外模型请求。"><SlSwitch v-model="config.memory_enabled" aria-label="长期记忆" /></SettingRow>
-        <p v-if="!contextEnabled && !config.memory_enabled">每次提问独立处理，只发送角色提示词和本次问题。</p>
-        <SlDisclosure title="高级设置" description="较早对话的摘要和记录保留">
-          <SettingRow title="保留更早的对话摘要" subtitle="压缩较早的问答供后续参考，会产生额外模型请求。关闭历史对话时暂停使用和生成。"><SlSwitch v-model="config.summary_enabled" :disabled="!contextEnabled" aria-label="对话摘要" /></SettingRow>
+        <SettingRow title="携带历史对话"><SlSwitch :model-value="contextEnabled" aria-label="携带历史对话" @update:model-value="setContextEnabled($event)" /></SettingRow>
+        <label v-if="contextEnabled" class="chat-field">参考最近几轮（1–24）<SlInput :model-value="String(config.context_turns)" type="number" aria-label="上下文轮数" @update:model-value="config.context_turns = Number($event)" /></label>
+        <SettingRow class="chat-divider-top" title="记住我的偏好"><SlSwitch v-model="config.memory_enabled" aria-label="长期记忆" /></SettingRow>
+        <SettingRow title="保留更早的对话摘要"><SlSwitch v-model="config.summary_enabled" :disabled="!contextEnabled" aria-label="对话摘要" /></SettingRow>
+        <div class="field-grid history-fields-row">
           <label class="chat-field">历史保留天数（1–30）<SlInput :model-value="String(config.history_days)" type="number" aria-label="历史保留天数" @update:model-value="config.history_days = Number($event)" /></label>
           <label class="chat-field">历史最大轮数（12–500）<SlInput :model-value="String(config.history_limit)" type="number" aria-label="历史最大轮数" @update:model-value="config.history_limit = Number($event)" /></label>
-          <p>关闭选项会保留本地数据；需要删除时使用下面的数据清理操作。</p>
-        </SlDisclosure>
+        </div>
+        <p v-if="!contextEnabled && !config.memory_enabled">每次提问独立处理，只发送角色提示词和本次问题。</p>
       </div>
     </SectionCard>
-    <SectionCard title="对话模型与角色" description="默认使用上方的模型连接。可单独选择对话模型，或改用独立连接。">
+    <SectionCard title="连接与模型" icon="link">
       <div class="form-body">
-      <SlSelect :disabled="busy || !loaded" v-model="config.connection" :options="[{ value: 'analysis', label: '复用默认模型连接' }, { value: 'independent', label: '独立连接' }]" aria-label="对话模型连接" />
+      <SlSelect :disabled="busy || !loaded" v-model="config.connection" :options="[{ value: 'analysis', label: '复用默认模型连接' }, { value: 'independent', label: '独立连接' }]" aria-label="对话模型连接" searchable />
       <template v-if="config.connection === 'independent'">
-        <label class="chat-field">服务地址<SlInput v-model="config.api_url" type="url" aria-label="问答 API 地址" placeholder="粘贴服务商提供的 API 基础地址" /><small>例如 https://example.com/v1，请勿粘贴聊天或搜索请求的完整地址。</small></label>
+        <label class="chat-field">服务地址<SlInput v-model="config.api_url" type="url" aria-label="问答 API 地址" placeholder="粘贴服务商提供的 API 基础地址" /></label>
         <label class="chat-field">API 密钥<SlInput v-model="config.api_key" type="password" aria-label="问答 API 密钥" /></label>
       </template>
-      <p v-if="config.connection === 'analysis'">默认模型：{{ state.config.ai_config.model || '尚未配置' }}。同时复用默认连接的自定义请求头。启用对话不需要开启口令分析。</p>
-      <label class="chat-field">问答模型<SlInput v-model="config.model" aria-label="问答模型" placeholder="留空则使用默认模型" /></label>
-      <SlButton v-if="config.connection === 'independent'" label="保存并获取模型" variant="outlined" :disabled="busy || !loaded" @click="safeAction(async () => { await save(); models = (await get<{ models: Array<{ id: string }> }>('/chat/models')).models; })" />
-      <SlSelect :disabled="busy || !loaded" v-if="models.length" v-model="config.model" :options="models.map(m => ({ value: m.id, label: m.id }))" aria-label="可用问答模型" />
-      <SettingRow title="联网搜索" subtitle="回答实时问题时，允许 AI 搜索资料。可能产生额外费用。">
+      <div v-if="config.connection === 'independent'" class="chat-model-row">
+        <SlSelect v-if="models.length" v-model="config.model" :options="modelSelectOptions" allow-empty placeholder="留空则使用默认模型" aria-label="问答模型" searchable search-placeholder="搜索模型名称" />
+        <SlInput v-else v-model="config.model" aria-label="问答模型" placeholder="留空则使用默认模型" />
+        <SlButton class="input-style-btn chat-model-fetch-btn" label="获取模型" variant="tonal" :disabled="busy || !loaded" @click="safeAction(async () => { await flushAutoSave(); models = (await get<{ models: Array<{ id: string }> }>('/chat/models')).models; })" />
+      </div>
+      <AIHeadersField v-if="config.connection === 'independent'" v-model="customHeaders" label="问答自定义请求头" />
+      <label class="chat-field">请求超时（1–30 秒）<SlInput :model-value="String(config.timeout)" type="number" aria-label="问答超时" @update:model-value="config.timeout = Number($event)" /></label>
+      </div>
+    </SectionCard>
+    <SectionCard title="联网搜索与测试" icon="search">
+      <div class="form-body">
+      <label class="chat-field">连接方式<SlSelect v-model="config.api_protocol" :options="[{ value: 'chat_completions', label: '兼容模式（Chat Completions）' }, { value: 'responses', label: '搜索工具模式（Responses）' }]" aria-label="问答接口协议" searchable /></label>
+      <SettingRow title="联网搜索">
         <SlSwitch :model-value="config.web_search_enabled" aria-label="联网搜索" @update:model-value="setWebSearch($event)" />
       </SettingRow>
-      <p v-if="config.web_search_enabled && webSearchAvailable">由模型决定是否搜索。建议先测试，确认当前服务和模型是否支持。</p>
       <div v-if="config.web_search_enabled && !webSearchAvailable" class="chat-search-help">
         <p>当前连接方式尚未启用搜索支持。</p>
-        <SlButton label="启用搜索连接" variant="outlined" @click="config.api_protocol = 'responses'" />
       </div>
-      <div class="chat-actions">
-        <SlButton label="测试连接" variant="outlined" :disabled="busy || !loaded" @click="safeAction(() => testConnection(false))" />
-        <SlButton v-if="config.web_search_enabled" label="测试联网搜索" variant="outlined" :disabled="busy || !loaded || !webSearchAvailable" @click="safeAction(() => testConnection(true))" />
+      <div class="chat-actions chat-test-actions">
+        <SlButton class="chat-test-btn" label="测试连通性" variant="tonal" :disabled="busy || !loaded" @click="safeAction(() => testConnection(false))" />
+        <SlButton v-if="config.web_search_enabled" class="chat-test-btn" label="测试联网搜索" variant="tonal" :disabled="busy || !loaded || !webSearchAvailable" @click="safeAction(() => testConnection(true))" />
       </div>
-      <p class="chat-help">使用当前填写的内容发送一次简短提问，无需先保存，不播放也不保存聊天记录。</p>
       <p v-if="connectionTesting" role="status">正在测试当前连接，请稍候……</p>
       <div v-if="connectionTest" class="chat-connection-result" role="status" aria-live="polite">
         <template v-if="connectionTest.connected">
           <strong>{{ connectionTest.search === 'completed' ? '连接正常 · 已收到搜索完成记录' : connectionTest.search === 'unconfirmed' ? '连接正常 · 本次搜索未确认' : '连接正常 · 模型已回复' }}</strong>
           <p v-if="connectionTest.search === 'completed'">服务返回了搜索完成记录。正式问答时仍由模型决定是否搜索。</p>
-          <p v-else-if="connectionTest.search === 'unconfirmed'">已允许模型搜索，但服务未返回搜索完成记录，不能确认本次实际联网。请核对服务商和模型的搜索支持。</p>
-          <p v-else>可以继续配置或保存。连接正常不代表已验证联网搜索。</p>
+          <p v-else-if="connectionTest.search === 'unconfirmed'">已允许模型搜索，但未返回搜索完成记录，请核对服务商和模型是否支持联网搜索。</p>
+          <p v-else>请继续测试联网搜索，连接正常不代表已验证联网搜索。</p>
         </template>
         <template v-else>
           <strong class="chat-error">测试未通过</strong>
           <p class="chat-text">{{ connectionTest.error }}</p>
           <p v-if="/401|403/.test(connectionTest.error || '')">请核对 API 密钥是否有效，以及账号是否有权使用此模型。</p>
-          <p v-else-if="/404|405/.test(connectionTest.error || '')">请核对服务地址。当前服务可能不支持此连接方式，可在高级设置中切换后重试。</p>
-          <p v-else-if="/timed out|超时/i.test(connectionTest.error || '')">请检查网络，尝试响应更快的模型，或在高级设置中调整超时时间。</p>
-          <p v-else>请检查服务地址、密钥和模型；需要调整连接方式时展开高级设置。</p>
+          <p v-else-if="/404|405/.test(connectionTest.error || '')">请核对服务地址。当前服务可能不支持此连接方式，可在「连接与模型」中切换后重试。</p>
+          <p v-else-if="/timed out|超时/i.test(connectionTest.error || '')">请检查网络，尝试响应更快的模型，或在「连接与模型」中调整超时时间。</p>
+          <p v-else>请检查服务地址、密钥和模型；需要调整连接方式时请检查「连接与模型」。</p>
         </template>
       </div>
-      <SlDisclosure title="高级设置" description="连接方式、自定义请求头、角色与其他选项">
-      <label class="chat-field">连接方式<SlSelect v-model="config.api_protocol" :options="[{ value: 'chat_completions', label: '兼容模式（Chat Completions）' }, { value: 'responses', label: '搜索工具模式（Responses）' }]" aria-label="问答接口协议" /></label>
-      <p>普通连接可保留兼容模式。自定义服务的内置搜索可尝试搜索工具模式，需服务商和模型支持 Responses。切换后请重新测试。</p>
-      <AIHeadersField v-if="config.connection === 'independent'" v-model="customHeaders" label="问答自定义请求头" />
-      <label class="chat-field">请求超时（1–30 秒）<SlInput :model-value="String(config.timeout)" type="number" aria-label="问答超时" @update:model-value="config.timeout = Number($event)" /></label>
-      <label class="chat-field">常用城市<SlInput v-model="config.city" aria-label="常用城市" placeholder="例如：浙江嘉兴" maxlength="100" /><small>回答天气等地点相关问题时默认使用此城市，会自动写入提问；需配合联网搜索获取实时天气。留空则不注入。</small></label>
-      <label class="chat-field">角色提示词<textarea v-model="config.system_prompt" class="sl-input chat-textarea" aria-label="角色提示词" maxlength="4000"></textarea></label>
-      <SettingRow title="音乐口令未命中后交给 AI" subtitle="仅在说了触发词或追问窗口内生效；开启「必须说触发词」后不会让设备口令变成提问。"><SlSwitch v-model="config.fallback_enabled" aria-label="兜底问答" /></SettingRow>
-      <label class="chat-field">追问窗口（秒，0 关闭）<SlInput :model-value="String(config.followup_seconds)" type="number" aria-label="追问窗口" @update:model-value="config.followup_seconds = Number($event)" /></label>
-      <p>追问窗口决定哪些话交给 AI；历史上下文决定 AI 能参考哪些问答。</p>
-      <SettingRow title="实时显示回答" subtitle="逐步显示模型生成的文字，音箱仍等待完整回答后播报。接口不支持时可关闭。"><SlSwitch v-model="config.streaming_enabled" aria-label="实时显示回答" /></SettingRow>
-      <p v-if="streamingAvailable === false">当前服务端尚不支持实时接收，将等待完整回答。升级服务端后可用。</p>
-      </SlDisclosure>
       </div>
     </SectionCard>
-    <div class="chat-save">
-      <span v-if="dirty" role="status">有未保存的修改</span>
-      <span class="chat-help">AI 对话主开关已即时生效，此处保存其它设置。</span>
-      <SlButton label="保存设置" :disabled="busy || !loaded || !dirty" @click="safeAction(save)" />
-    </div>
-    <SectionCard title="对话测试" description="使用当前选中的受管理音箱。关闭播报可测试模型而不暂停音乐。">
+    <SectionCard title="角色与对话行为" icon="auto_awesome">
       <div class="form-body">
-      <SlSelect :disabled="busy || !loaded" :model-value="deviceSelection" :options="deviceOptions" aria-label="对话设备" @update:model-value="safeAction(async () => { const [account, device] = JSON.parse($event); await selectDevice(account, device); })" />
-      <p>当前状态：<strong>{{ phase }}</strong></p>
-      <p v-if="active" role="status">问题处理中，可随时停止回答。音箱会在完整回答生成后播报。</p>
-      <div v-if="state.chatStatus?.answer" class="chat-live-answer" aria-label="当前回答"><strong>{{ active ? '当前回答' : '最近回答' }}</strong><p class="chat-text">{{ state.chatStatus.answer }}</p></div>
+      <label class="chat-field">角色提示词<textarea v-model="config.system_prompt" class="sl-input chat-textarea" aria-label="角色提示词" maxlength="4000"></textarea></label>
+      <div class="field-grid city-followup-row">
+        <label class="chat-field">常用城市<SlInput v-model="config.city" aria-label="常用城市" placeholder="例如：浙江嘉兴" maxlength="100" /></label>
+        <label class="chat-field">追问窗口（秒，0 关闭）<SlInput :model-value="String(config.followup_seconds)" type="number" aria-label="追问窗口" @update:model-value="config.followup_seconds = Number($event)" /></label>
+      </div>
+      <SettingRow title="音乐口令未命中后交给 AI"><SlSwitch v-model="config.fallback_enabled" aria-label="兜底问答" /></SettingRow>
+      <SettingRow title="实时显示回答"><SlSwitch v-model="config.streaming_enabled" aria-label="实时显示回答" /></SettingRow>
+      <p v-if="streamingAvailable === false">当前服务端尚不支持实时接收，将等待完整回答。升级服务端后可用。</p>
+      <p v-if="autoSaveError" role="alert" class="chat-error">{{ autoSaveError }}</p>
+      </div>
+    </SectionCard>
+    <SectionCard title="对话测试" icon="science">
+      <div class="form-body">
+      <SlSelect :disabled="busy || !loaded" :model-value="deviceSelection" :options="deviceOptions" aria-label="对话设备" searchable search-placeholder="搜索设备" @update:model-value="safeAction(async () => { const [account, device] = JSON.parse($event); await selectDevice(account, device); })" />
+      <SettingRow title="在音箱上播报"><SlSwitch v-model="speak" aria-label="播报回答" /></SettingRow>
+      <label class="chat-field">输入问题<SlInput v-model="question" aria-label="对话问题" maxlength="2000" /></label>
+      <div class="chat-status-panel">
+        <p>当前状态：<strong>{{ phase }}</strong></p>
+        <p v-if="active" role="status">问题处理中，可随时停止回答。音箱会在完整回答生成后播报。</p>
+        <div v-if="state.chatStatus?.answer" class="chat-live-answer" aria-label="当前回答"><strong>{{ active ? '当前回答' : '最近回答' }}</strong><p class="chat-text">{{ state.chatStatus.answer }}</p></div>
+      </div>
       <p v-if="refreshError" role="status">{{ refreshError }}</p>
       <p v-if="state.chatStatus?.error" role="alert">{{ state.chatStatus.error }}</p>
-      <label class="chat-field">问题<textarea v-model="question" class="sl-input chat-textarea" aria-label="对话问题" maxlength="2000"></textarea></label>
-      <SettingRow title="在音箱上播报"><SlSwitch v-model="speak" aria-label="播报回答" /></SettingRow>
-      <div class="chat-actions">
-        <SlButton label="提问" :disabled="busy || !config.enabled || !question.trim() || !target.device_id" @click="safeAction(submit)" />
-        <SlButton label="停止回答" variant="outlined" :disabled="busy || !active" @click="safeAction(async () => { await post('/chat/cancel', { ...target, close_session: true, resume_music: false }); await refresh(); })" />
-        <SlButton label="退出并恢复音乐" variant="outlined" :disabled="busy || !active" @click="safeAction(async () => { await post('/chat/cancel', { ...target, close_session: true, resume_music: true }); await refresh(); })" />
-        <SlButton label="重置会话" variant="outlined" :disabled="busy || !target.device_id" @click="safeAction(async () => { await post('/chat/reset', target); await refresh(); })" />
+      <div class="chat-actions chat-dialog-actions">
+        <SlButton label="提问" variant="outlined" :disabled="busy || !config.enabled || !question.trim() || !target.device_id" @click="safeAction(submit)" />
+        <SlButton label="停止" variant="outlined" :disabled="busy || !active" @click="safeAction(async () => { await post('/chat/cancel', { ...target, close_session: true, resume_music: false }); await refresh(); })" />
+        <SlButton label="退出" variant="outlined" :disabled="busy || !active" @click="safeAction(async () => { await post('/chat/cancel', { ...target, close_session: true, resume_music: true }); await refresh(); })" />
+        <SlButton label="重置" variant="outlined" :disabled="busy || !target.device_id" @click="safeAction(async () => { await post('/chat/reset', target); await refresh(); })" />
       </div>
       </div>
     </SectionCard>
-    <SectionCard title="聊天历史" description="按账号和设备隔离，默认保存 30 天、最多 500 轮。取消和失败也会显示。">
+    <SlDisclosure title="聊天历史" icon="inbox">
       <div class="form-body">
       <p v-if="summary" class="chat-text">摘要：{{ summary }}</p>
       <p v-if="!history.length">暂无对话记录</p>
@@ -286,11 +335,11 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
       <div class="chat-actions">
         <SlButton label="上一页" variant="outlined" :disabled="busy || offset === 0" @click="safeAction(async () => { offset = Math.max(0, offset - 20); await refresh(); })" />
         <SlButton label="下一页" variant="outlined" :disabled="busy || offset + history.length >= total" @click="safeAction(async () => { offset += 20; await refresh(); })" />
-        <SlButton label="清空历史和摘要" variant="text" :disabled="busy || !target.device_id" @click="safeAction(() => clear('history'))" />
+        <SlButton label="清空历史和摘要" class="chat-clear-history-btn" variant="outlined" :disabled="busy || !target.device_id" @click="safeAction(() => clear('history'))" />
       </div>
       </div>
-    </SectionCard>
-    <SlDisclosure title="偏好记忆管理" description="查看、编辑或删除保存的偏好；手工编辑不会被自动覆盖。">
+    </SlDisclosure>
+    <SlDisclosure title="偏好记忆管理" icon="memory">
       <div class="form-body">
       <article v-for="memory in memories" :key="memory.id" class="chat-turn">
         <SlInput :model-value="memoryDrafts[memory.id] ?? memory.content" @update:model-value="memoryDrafts[memory.id] = $event" aria-label="记忆内容" />
@@ -301,10 +350,10 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
         </div>
       </article>
       <label class="chat-field">新增记忆<SlInput v-model="newMemory" aria-label="新增记忆" /></label>
-      <div class="chat-actions">
+      <div class="chat-actions chat-memory-actions">
         <SlButton label="添加记忆" variant="outlined" :disabled="busy || !newMemory.trim() || !target.device_id" @click="safeAction(async () => { await post('/chat/memories', { ...target, content: newMemory }); newMemory = ''; await refresh(); })" />
-        <SlButton label="清空长期记忆" variant="text" :disabled="busy || !target.device_id" @click="safeAction(() => clear('memory'))" />
-        <SlButton label="全部清空" variant="text" :disabled="busy || !target.device_id" @click="safeAction(() => clear('all'))" />
+        <SlButton label="清空长期记忆" variant="outlined" :disabled="busy || !target.device_id" @click="safeAction(() => clear('memory'))" />
+        <SlButton label="全部清空" variant="outlined" :disabled="busy || !target.device_id" @click="safeAction(() => clear('all'))" />
       </div>
       </div>
     </SlDisclosure>
@@ -313,8 +362,13 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
 
 <style scoped>
 .chat-settings { display: grid; gap: 16px; min-width: 0; margin: 0; padding: 0; border: 0; }
-.chat-save { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.chat-status-panel { padding: 12px 16px; border: 1px solid var(--md-outline-variant); border-radius: 12px; background: var(--md-surface-container); }
+.chat-status-panel > p { margin-block: 6px 0; }
+.chat-status-panel > p:first-child { margin-block-start: 0; }
 .chat-live-answer { padding: 12px; background: var(--md-surface-container); border-radius: 12px; }
+/* 状态区已整体成模块，内部回答块去掉自带底色，避免嵌套色块。 */
+.chat-status-panel .chat-live-answer { padding: 12px 0 0; margin-block-start: 8px; background: transparent; border-top: 1px solid var(--md-outline-variant); border-radius: 0; }
+.chat-status-panel .chat-live-answer > p { margin-block: 6px 0 0; }
 .chat-field { display: grid; gap: 8px; margin-block: 12px; }
 .chat-textarea { min-height: 100px; resize: vertical; }
 .chat-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
@@ -322,6 +376,5 @@ const safeAction = (run: () => Promise<void>) => { if (alive) void action(run); 
 .chat-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .chat-connection-result { padding: 12px 16px; border: 1px solid var(--md-outline-variant); border-radius: 12px; background: var(--md-surface-container); overflow-wrap: anywhere; }
 .chat-connection-result p { margin-block: 6px 0; }
-.chat-help { color: var(--md-on-surface-variant); font-size: 0.875rem; }
 .chat-error { color: var(--md-error); }
 </style>

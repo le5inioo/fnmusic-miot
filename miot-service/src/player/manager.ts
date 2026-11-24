@@ -11,6 +11,10 @@ import { hasLostDeviceMedia, isDeviceIdle, isDeviceStatusKnown } from '../playba
 import { getHostBaseUrl, callHostAPI } from '../utils/http';
 import { isDebugLog } from '../utils/debug';
 import type { PlayState, PlayMode, PlayerStatus, DeviceTargetRef, DeviceGroup } from '../types';
+import { findFavoritesPlaylist } from '../utils/favorites';
+
+/** 虚拟「[音乐库]全部歌曲」歌单：单曲点播播完后的最后一级兜底。 */
+const ALL_SONGS_PLAYLIST_ID = 2000000000;
 
 /** 分配临时歌单唯一负数 ID（每个设备/歌手各一个，互不冲突） */
 let nextTempPlaylistId = -1;
@@ -458,6 +462,13 @@ export class PlaylistManager {
   private targets: DeviceTargetRef[];
   private onAdvanceHook?: () => boolean;
   private announceOnSongChange: boolean = false;
+  // 仅「搜索/语音点一首歌」会置 true：这一首自然播完后跳 收藏 → 猜你喜欢 → 全部歌曲。
+  private pointSongChain: boolean = false;
+  // 兜底链一旦启动就持续生效：收藏整张播完接着猜你喜欢，再接着全部歌曲。
+  // 只有用户主动播放/切歌/停止才清掉；链内部调 play() 时用 fallbackInternalPlay 豁免。
+  private fallbackChainActive: boolean = false;
+  private fallbackChainCurrentId: number = 0;
+  private fallbackInternalPlay: boolean = false;
 
   constructor(
     accountId: string,
@@ -581,6 +592,8 @@ export class PlaylistManager {
     this.state = 'idle';
     this.playStartTimeMs = 0;
     this._lastLoadNotFound = false;
+    this.pointSongChain = false;
+    if (!this.fallbackInternalPlay) this.fallbackChainActive = false;
 
     // 加载歌单歌曲
     const loaded = await this.loadPlaylistSongs(playlistId, opts?.isCurrent);
@@ -658,6 +671,8 @@ export class PlaylistManager {
     this.state = 'idle';
     this.playStartTimeMs = 0;
     this._lastLoadNotFound = false;
+    this.pointSongChain = false;
+    this.fallbackChainActive = false;
 
     const loaded = await this.loadPlaylistSongs(playlistId, isCurrent);
     if (!loaded) {
@@ -716,7 +731,7 @@ export class PlaylistManager {
    * 用于"播放歌手XX的歌"等场景，将跨歌单收集的歌曲作为虚拟播放列表。
    * @param artistQuery - 歌手搜索词，用于重启后恢复
    */
-  async playWithSongs(songs: Song[], startIndex: number, mode: PlayMode, label?: string, artistQuery?: string, isCurrent?: () => boolean, exactArtist?: boolean): Promise<boolean> {
+  async playWithSongs(songs: Song[], startIndex: number, mode: PlayMode, label?: string, artistQuery?: string, isCurrent?: () => boolean, exactArtist?: boolean, continueChainOnFinish?: boolean): Promise<boolean> {
     if (isCurrent?.() === false) return false;
     this.endExternalPlayback();
     this.stopCheckTimer();
@@ -724,6 +739,9 @@ export class PlaylistManager {
     this.playStartTimeMs = 0;
     this._lastLoadNotFound = false;
     this.pendingTempArtist = '';
+    this.pointSongChain = !!continueChainOnFinish;
+    this.fallbackChainActive = false;
+    this.fallbackChainCurrentId = 0;
 
     if (!songs || songs.length === 0) {
       songloft.log.warn('[PlaylistManager] playWithSongs: empty song list');
@@ -754,54 +772,32 @@ export class PlaylistManager {
     return true;
   }
 
-  /** 点播独立歌曲时，先播放命中歌曲，再续播曲库中同歌手的歌曲。 */
-  async playStandaloneSong(
-    song: Song,
-    indexingManager: import('../indexing/manager').IndexingManager,
-    taskCurrent?: () => boolean,
-  ): Promise<boolean> {
-    const revision = this.getPlaybackRevision();
-    const epoch = this.playbackEpoch;
-    const isCurrent = () =>
-      taskCurrent?.() !== false && revision === this.getPlaybackRevision() && epoch === this.playbackEpoch;
-    let mode: PlayMode = 'order';
-    try {
-      const devices = await this.configManager.getDevices(this.accountId);
-      mode = normalizePlayMode(devices.find((device) => device.device_id === this.deviceId)?.play_mode);
-    } catch (e) {
-      songloft.log.warn('[PlaylistManager] Failed to read standalone play mode: ' + String(e));
-    }
-    if (!isCurrent()) return false;
-    const artist = song.type === 'radio' ? '' : (song.artist || '').trim();
-    let others: Song[] = [];
-    if (artist && song.type !== 'radio') {
-      try {
-        others = await indexingManager.loadLibrarySongsByArtist(artist, isCurrent);
-      } catch (e) {
-        songloft.log.warn('[PlaylistManager] Failed to build artist queue: ' + String(e));
-      }
-    }
-    if (!isCurrent()) return false;
-    const seen = new Set([song.id]);
-    const queue = [
-      song,
-      ...others.filter((candidate) => {
-        if (seen.has(candidate.id)) return false;
-        seen.add(candidate.id);
-        return true;
-      }),
-    ];
-    // playWithSongs 会改变 revision，传入的任务守卫仍由它贯穿实际推流。
-    // 不入库的临时直链可能过期，不持久化它的歌手队列恢复标记。
+  /**
+   * 一次性点播（搜索点歌 / 语音点歌）：只播这一首，播完按 收藏 → 猜你喜欢 → 全部歌曲 续播。
+   * 用 singlePlay 保证自然播完不顺着临时队列走；续播逻辑在 advanceToNextInternal 里接管。
+   */
+  async playOneOffSong(song: Song, label?: string, taskCurrent?: () => boolean): Promise<boolean> {
     return this.playWithSongs(
-      queue,
+      [song],
       0,
-      mode,
-      artist ? '歌手: ' + artist : '单曲: ' + song.title,
-      song.id > 0 ? artist : '',
+      'singlePlay',
+      label || ('单曲: ' + (song.title || '')),
+      '', // 不留歌手恢复标记，否则热重载会把「单曲」重建回整歌手的队列
       taskCurrent,
+      false,
       true,
     );
+  }
+
+  /** 点播独立歌曲：统一走单曲模式，播完交给默认歌单链续播。 */
+  async playStandaloneSong(
+    song: Song,
+    _indexingManager: import('../indexing/manager').IndexingManager,
+    taskCurrent?: () => boolean,
+  ): Promise<boolean> {
+    // 过去会拼「命中歌曲 + 同歌手」队列，现在点歌一律只播这一首，
+    // 播完由 advanceToNextInternal 的兜底链接管（收藏 → 猜你喜欢 → 全部歌曲）。
+    return this.playOneOffSong(song, '单曲: ' + song.title, taskCurrent);
   }
 
   /**
@@ -883,6 +879,9 @@ export class PlaylistManager {
   private async stopInternal(pushToDevice: boolean, isCurrent?: () => boolean): Promise<void> {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
+    this.pointSongChain = false;
+    this.fallbackChainActive = false;
+    this.fallbackChainCurrentId = 0;
     this.confirmedTailStream = null;
     this.state = 'stopped';
     this.playStartTimeMs = 0;
@@ -910,6 +909,9 @@ export class PlaylistManager {
     if (isCurrent?.() === false) return false;
     this.endExternalPlayback();
     this.stopCheckTimer();
+    this.pointSongChain = false;
+    this.fallbackChainActive = false;
+    this.fallbackChainCurrentId = 0;
     if (this.songs.length === 0) {
       songloft.log.warn('[PlaylistManager] No playlist loaded for next');
       return false;
@@ -2816,8 +2818,21 @@ export class PlaylistManager {
         if (this.state !== 'playing' || this.currentIndex !== indexAtCheck || this.checkTimerGeneration !== generationAtCheck) return;
         this.recordDevicePosition(st);
         const validPosition = st.hasPosition && Number.isFinite(st.position) && st.position >= 0;
+        // seek 起播的尾流：设备常在尾部把 streamDuration 报成 0，matchDeviceStream 返回
+        // 'unknown'，observeTailLoop 因此每次都丢弃回零基线；而「流内推进 ≥10s 再回零」的
+        // 通用后备判据对只剩几秒的 seek 尾流也够不到。结果把「播完重拉」误判成「回到 seek
+        // 起点」，重锚 playStartTimeMs 并把定时器重置为整段剩余时长——进度条回跳、反复几次
+        // 才切歌。这里用可推算的期望流长补足：采样曾推进到流尾附近后又回零即视为播完。
+        // 非 seek 播放 streamSeekOffsetSec=0，不进入这条判据。
+        const seekStreamSec = this.streamSeekOffsetSec > 0 && song.duration > 0
+          ? (song.duration - this.streamSeekOffsetSec) / this.playbackSpeed
+          : 0;
+        const seekTailLooped = seekStreamSec > 0 &&
+          maxPosition >= Math.max(2, seekStreamSec - LOOP_DETECT_RESET_THRESHOLD_SEC) &&
+          st.position < LOOP_DETECT_RESET_THRESHOLD_SEC;
         const looped = this.observeTailLoop(st) ||
-          (maxPosition >= LOOP_DETECT_MIN_ADVANCE_SEC && st.position < LOOP_DETECT_RESET_THRESHOLD_SEC);
+          (maxPosition >= LOOP_DETECT_MIN_ADVANCE_SEC && st.position < LOOP_DETECT_RESET_THRESHOLD_SEC) ||
+          seekTailLooped;
         const advancing = lastPosition >= 0 && st.position > lastPosition;
         const stillPlaying = st.status === 1 || (st.status >= 0 && advancing);
         const progressedSinceDeadline = this.deadlineLastPosition < 0 || st.position > this.deadlineLastPosition;
@@ -3637,6 +3652,60 @@ export class PlaylistManager {
   }
 
   /**
+   * 单曲点播播完后的兜底续播：收藏 → 猜你喜欢 → 全部歌曲。
+   * 空歌单/失效 ID 由 play() 自己返回 false，这里直接跳下一级；全部失败才交回上层停止。
+   * 用 order 起播，保证续播的是歌单本身而不是又一首 singlePlay。
+   */
+  private async continueFromFallbackPlaylists(afterPlaylistId?: number): Promise<boolean> {
+    let favoriteId = 1;
+    let guessId = 0;
+    try {
+      const playlists: any[] = (await songloft.playlists.list()) || [];
+      favoriteId = findFavoritesPlaylist(playlists)?.id ?? 1;
+      const guess = playlists.find((p: any) => p.type === 'normal' && p.name === '猜你喜欢');
+      guessId = guess ? Number(guess.id) : 0;
+    } catch (e) {
+      songloft.log.warn('[PlaylistManager] Fallback playlist lookup failed: ' + String(e));
+    }
+    const chain: number[] = [favoriteId];
+    if (guessId && guessId !== favoriteId) chain.push(guessId);
+    if (!chain.includes(ALL_SONGS_PLAYLIST_ID)) chain.push(ALL_SONGS_PLAYLIST_ID);
+
+    // 首次从第 0 级开始；某级整张播完后从它的下一级继续。
+    const currentIdx = afterPlaylistId === undefined ? -1 : chain.indexOf(afterPlaylistId);
+    if (afterPlaylistId !== undefined && currentIdx < 0) {
+      this.fallbackChainActive = false;
+      this.fallbackChainCurrentId = 0;
+      return false;
+    }
+    this.fallbackChainActive = true;
+    for (let i = currentIdx + 1; i < chain.length; i++) {
+      const id = chain[i];
+      try {
+        songloft.log.info(`[PlaylistManager] Point song finished, trying fallback playlist ${id}`);
+        this.fallbackInternalPlay = true;
+        let started = false;
+        try {
+          started = await this.play(id, 0, 'order');
+        } finally {
+          this.fallbackInternalPlay = false;
+        }
+        if (started) {
+          this.fallbackChainCurrentId = id;
+          songloft.log.info(`[PlaylistManager] Fallback playlist started id=${id}`);
+          return true;
+        }
+        songloft.log.warn(`[PlaylistManager] Fallback playlist ${id} empty or unavailable, trying next`);
+      } catch (e) {
+        songloft.log.warn(`[PlaylistManager] Fallback playlist ${id} failed: ${String(e)}`);
+      }
+    }
+    this.fallbackChainActive = false;
+    this.fallbackChainCurrentId = 0;
+    return false;
+  }
+
+  /**
    * 切到下一首并播放（自动续播核心）。playCurrent 会把新歌下发给全部目标设备。
    */
   private async advanceToNext(): Promise<void> {
@@ -3659,6 +3728,17 @@ export class PlaylistManager {
       callHostAPI('POST', `/api/v1/songs/${finishedSong.id}/played?source=miot`, undefined, { timeoutMs: 3000 }).catch(e => {
         songloft.log.warn('[PlaylistManager] songPlayed notify failed: ' + String(e));
       });
+    }
+
+    // 点歌（搜索/语音）只播一首：这里在 singlePlay 的「播完即止」之前接管，
+    // 按 收藏 → 猜你喜欢 → 全部歌曲 起播；全都没有时仍走原来的 singlePlay 停止逻辑。
+    if (this.pointSongChain) {
+      this.pointSongChain = false;
+      if (await this.continueFromFallbackPlaylists()) {
+        songloft.log.info('[PlaylistManager] Point song chained into fallback playlist');
+        return;
+      }
+      songloft.log.warn('[PlaylistManager] No fallback playlist available after point song');
     }
 
     if (this.playMode === 'singlePlay') {
@@ -3703,6 +3783,12 @@ export class PlaylistManager {
       this.clearPendingNextIndex();
     }
     if (nextIdx < 0) {
+      // 兜底链里某一级整张播完（如收藏 4 首播完），接着下一级；全部歌曲播完才真正停止。
+      if (this.fallbackChainActive && this.fallbackChainCurrentId > 0 &&
+        await this.continueFromFallbackPlaylists(this.fallbackChainCurrentId)) {
+        songloft.log.info('[PlaylistManager] Fallback chain advanced to next playlist');
+        return;
+      }
       songloft.log.info('[PlaylistManager] No next song, playback complete');
       this.state = 'stopped';
       this.playStartTimeMs = 0;

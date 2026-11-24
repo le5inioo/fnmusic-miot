@@ -120,6 +120,8 @@ export function registerConfigHandlers(
           external_search_playlist_id: config.external_search_playlist_id ?? '',
           external_search_timeout: config.external_search_timeout ?? 6,
           external_search_no_import: !!config.external_search_no_import,
+          fnmusic_local_search_enabled: config.fnmusic_local_search_enabled !== false,
+          fnmusic_online_search_enabled: config.fnmusic_online_search_enabled !== false,
           search_priority: normalizeSearchPriority(config.search_priority),
           music_api_model_disabled: config.music_api_model_disabled || [],
           music_api_model_enabled: config.music_api_model_enabled || [],
@@ -270,6 +272,14 @@ export function registerConfigHandlers(
       // 更新 external_search_no_import
       if (body.external_search_no_import !== undefined) {
         config.external_search_no_import = !!body.external_search_no_import;
+      }
+
+      // 更新飞牛音乐搜索开关（本地曲库 / ext 联网音源）
+      if (body.fnmusic_local_search_enabled !== undefined) {
+        config.fnmusic_local_search_enabled = !!body.fnmusic_local_search_enabled;
+      }
+      if (body.fnmusic_online_search_enabled !== undefined) {
+        config.fnmusic_online_search_enabled = !!body.fnmusic_online_search_enabled;
       }
 
       // 更新 search_priority

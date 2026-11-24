@@ -41,6 +41,10 @@ const label = computed(
 // 选项少到一屏能看完时，搜索框只是白占一行，在 APP 上还多一个误触输入法的入口。
 const SEARCH_MIN_OPTIONS = 5;
 const query = ref('');
+// 搜索框聚焦期间冻结面板位置：手机输入法弹起会让浏览器滚动页面，scroll/resize
+// 监听若继续按 trigger 的新坐标重定位，会把 fixed 面板连同搜索框一起拽到视口上方，
+// 表现为「一点搜索框列表就上移、看不到输入内容」。面板打开时已定位好，输入期间无需再动。
+const searchFocused = ref(false);
 const showSearch = computed(() => props.searchable && props.options.length > SEARCH_MIN_OPTIONS);
 const keyword = computed(() => (showSearch.value ? query.value.trim().toLowerCase() : ''));
 const filtered = computed(() =>
@@ -66,8 +70,9 @@ const SEARCH_ROW_H = 48;
 // 内层 maxHeight = height - PANEL_BORDER - searchH，少算这 2px 时哪怕只有 1 项，
 // maxHeight 也会比内容需要的高度小 2px、溢出出滚动条（小屏 itemH=40 时必现）。
 const PANEL_BORDER = 2;
-// .sl-select-panel-scroll 的上下 padding 各 4px，是选项之外的固有高度。
-const SCROLL_PAD = 8;
+// .sl-select-panel-scroll 上下无 padding（间距由 option 自身 padding 提供），
+// 选项之外没有固有高度；保留常量便于将来调整，当前为 0。
+const SCROLL_PAD = 0;
 const PANEL_GAP = 4;
 const VIEWPORT_EDGE = 8;
 // 下方至少要放得下这么多项，才认为「向下展开」是有意义的
@@ -165,12 +170,21 @@ function toggle() {
   nextTick(() => positionPanel(true));
 }
 function select(value: string) {
+  // 面板关闭走响应式更新、DOM 在微任务里才销毁；窗口期内再点一次选项会再次 emit。
+  // 对设备下拉等重操作，重复 emit 会连发 SSE 重连/后端请求，表现为点击后卡死。
+  // opened 由 openSelect 同步计算，关掉后立刻为 false，用它挡住重复触发。
+  if (!opened.value) return;
   openSelect.value = null;
   query.value = '';
+  searchFocused.value = false;
   emit('update:modelValue', value);
 }
 
 // 点外部 / Esc 关闭：自绘下拉需要这些处理，打开后点别处面板才会消失。
+// 不用透明全屏遮罩（backdrop）来做「点外部关闭」：那是个 position:fixed; inset:0
+// 的全屏层，一旦因时序/宿主 webview 差异没能随面板一起移除，就会盖住整页，
+// 表现为「点空白和其它控件都没反应、滚轮失灵」的假死。document 上的捕获监听
+// 已能可靠实现同样的「点外部关闭」，且不会留下任何覆盖层。
 function onPointerDown(event: PointerEvent) {
   if (!opened.value) return;
   const target = event.target as Node | null;
@@ -181,7 +195,7 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && opened.value) openSelect.value = null;
 }
 function handleViewportChange() {
-  if (!opened.value || repositioning) return;
+  if (!opened.value || repositioning || searchFocused.value) return;
   positionPanel(false);
 }
 // scroll 不冒泡，但 window 上的 capture 监听照样能收到后代元素的 scroll。面板内部
@@ -197,7 +211,7 @@ function onViewportScroll(event: Event) {
 // 过滤后行数变了要重算高度：向上展开的面板若不重定位，`top` 还按旧的高行数算，
 // 面板与触发器之间会裂开一道空隙。传 false —— 这里不能再去抢用户的滚动位置。
 watch(keyword, () => {
-  if (!opened.value) return;
+  if (!opened.value || searchFocused.value) return;
   void nextTick(() => positionPanel(false));
 });
 watch(opened, (isOpen) => {
@@ -207,6 +221,7 @@ watch(opened, (isOpen) => {
     window.addEventListener('resize', handleViewportChange);
     window.addEventListener('scroll', onViewportScroll, true);
   } else {
+    searchFocused.value = false;
     document.removeEventListener('pointerdown', onPointerDown, true);
     document.removeEventListener('keydown', onKeydown, true);
     window.removeEventListener('resize', handleViewportChange);
@@ -248,11 +263,6 @@ onBeforeUnmount(() => {
     />
     <div
       v-if="opened"
-      class="sl-select-backdrop"
-      @click="openSelect = null"
-    ></div>
-    <div
-      v-if="opened"
       ref="panel"
       class="sl-select-panel sl-select-panel-fixed"
       :style="panelStyle"
@@ -266,6 +276,8 @@ onBeforeUnmount(() => {
           :placeholder="searchPlaceholder"
           :aria-label="searchPlaceholder"
           @update:model-value="(value) => (query = value)"
+          @focus="searchFocused = true"
+          @blur="searchFocused = false"
         />
       </div>
       <div
@@ -274,6 +286,11 @@ onBeforeUnmount(() => {
         :aria-label="ariaLabel || undefined"
         :style="scrollStyle"
       >
+        <!-- .stop.prevent 必须保留：面板 DOM 在 .sl-select-wrap 内，若下拉被 <label>
+             包裹（如 ChatSettings 的「连接方式」），点选项这个 div 会被浏览器当成
+             点击 label、把事件转发给关联的 trigger button，触发 toggle 又把刚关掉的
+             面板重新打开——表现为「点选项不关闭、要点空白才关」。stop 掐断冒泡、
+             prevent 掐断 label 默认转发，两者缺一不可；原生 <select> 分支不受影响。 -->
         <div
           v-for="option in rows"
           :key="option.value"
@@ -281,7 +298,7 @@ onBeforeUnmount(() => {
           :class="{ 'sl-select-option-on': option.value === modelValue }"
           role="option"
           :aria-selected="option.value === modelValue"
-          @click="select(option.value)"
+          @click.stop.prevent="select(option.value)"
         >
           {{ option.label }}
         </div>

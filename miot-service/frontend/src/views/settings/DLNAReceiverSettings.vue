@@ -19,10 +19,9 @@ const saving = ref(false);
 const error = ref('');
 let timer: ReturnType<typeof setTimeout> | null = null;
 let disposed = false;
-const label = computed(() => !status.value?.enabled ? '已关闭' : status.value.running ? `${status.value.receivers.filter(r => r.running).length} 个接收器已开启` : status.value.error ? '启动失败' : status.value.enabled_ids.length ? '暂无可运行的接收器' : '请为音箱或分组开启插件 DLNA');
 function playbackLabel(value: string): string { return ({ PLAYING: '播放中', PAUSED_PLAYBACK: '已暂停', STOPPED: '已停止', NO_MEDIA_PRESENT: '等待投放' } as Record<string, string>)[value] || value; }
-// 每个接收器的运行状态文案。原先逐项渲染在接收器说明下方（也就是「保存接收器设置」按钮之前），
-// 现在统一收到按钮后面显示；多个接收器时带上名称前缀，避免几条状态混在一起看不出归属。
+// 每个接收器的运行状态文案，统一收到「保存接收器设置」按钮之前显示；
+// 多个接收器时带上名称前缀，避免几条状态混在一起看不出归属。
 function receiverStateText(receiver: ReceiverStatus['receivers'][number]): string {
   if (receiver.running) return playbackLabel(receiver.state);
   if (!receiver.enabled) return '插件入口已关闭';
@@ -72,38 +71,37 @@ onUnmounted(() => { disposed = true; if (timer !== null) clearTimeout(timer); })
 </script>
 
 <template>
-  <SectionCard title="DLNA 接收器" icon="speaker_group" description="按需为音箱或分组提供 DLNA 入口。原生支持 DLNA 的音箱可关闭插件入口，避免重复显示。">
-    <SettingRow title="插件 DLNA 总开关" :subtitle="label">
+  <SectionCard title="DLNA 接收器" icon="speaker_group">
+    <SettingRow title="插件 DLNA 总开关">
       <SlSwitch v-model="form.enabled" :disabled="saving || (!status?.host_supported && !form.enabled)" aria-label="启用 DLNA 接收器" />
     </SettingRow>
-    <SettingRow title="接收器名称前缀" subtitle="在前缀后显示音箱或分组名称，便于在投放列表中区分。">
+    <SettingRow title="接收器名称前缀">
       <SlInput v-model="form.name" :disabled="saving" aria-label="DLNA 接收器名称" />
     </SettingRow>
-    <SettingRow title="服务器局域网地址" subtitle="填写手机和音箱都能访问的 HTTP IPv4 地址，可包含部署子路径。">
+    <SettingRow title="服务器局域网地址">
       <SlInput v-model="form.base_url" :disabled="saving" placeholder="http://192.168.1.10:58091" aria-label="DLNA 服务器地址" />
     </SettingRow>
     <div class="form-body">
       <p v-if="status && !status.host_supported" role="alert">请升级 Miot 宿主以支持 DLNA 接收。</p>
       <p v-if="error" role="alert">{{ error }}</p>
-      <p>新增音箱和分组默认关闭，请逐项选择并保存。分组成员不重复显示；分组需至少两台且全部成员已启用管理。独立音箱与分组的开关分别保存，退组后恢复音箱原来的选择。共用 Miot HTTP 端口和 UDP 1900，无需为每个音箱分配端口。</p>
       <p v-if="status && !status.receivers.length">暂无可用的音箱或分组，请先启用音箱管理。</p>
       <div v-for="receiver in status?.receivers || []" :key="receiver.id" class="receiver-status">
-        <SettingRow :title="receiver.name" subtitle="保存后生效；关闭插件入口不影响音箱的原生 DLNA。">
+        <SettingRow :title="receiver.name">
           <SlSwitch :model-value="form.enabled_ids.includes(receiver.id)" :disabled="saving || !status?.host_supported || (!receiver.available && !form.enabled_ids.includes(receiver.id))" :aria-label="`为 ${receiver.name} 启用插件 DLNA`" @update:model-value="selectReceiver(receiver.id, $event)" />
         </SettingRow>
         <p v-if="receiver.group_id">分组 · {{ receiver.members.length }} 台音箱；进度和查询音量以首台音箱为参考。</p>
         <p v-if="receiver.error" role="alert">{{ receiver.error }}</p>
       </div>
       <div class="receiver-save-row">
-        <SlButton :disabled="saving || !status" variant="filled" :label="saving ? '正在保存…' : '保存接收器设置'" @click="save" />
         <span v-if="statusTexts.length" class="receiver-save-status" role="status">{{ statusTexts.join(' · ') }}</span>
+        <SlButton :disabled="saving || !status" variant="filled" :label="saving ? '正在保存…' : '保存接收器设置'" @click="save" />
       </div>
     </div>
   </SectionCard>
 </template>
 
 <style scoped>
-.receiver-save-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.receiver-save-row { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px 12px; }
 .receiver-save-row :deep(.sl-button) { flex: 0 0 auto; width: auto; }
 .receiver-save-status { min-width: 0; color: var(--md-on-surface-variant, #666); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 </style>

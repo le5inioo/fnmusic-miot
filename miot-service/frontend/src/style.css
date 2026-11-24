@@ -124,7 +124,9 @@ h1, h2, h3, p { margin: 0; }
 /* 面板本体不自己做滚动容器（songloft-org/songloft#397）：滚动交给内层
    .sl-select-panel-scroll，外层只管定位和外观。 */
 .sl-select-panel { position: absolute; z-index: 70; top: calc(100% + 4px); left: 0; box-sizing: border-box; overflow: hidden; border: 1px solid var(--md-outline-variant); border-radius: var(--md-radius-sm); background: var(--md-surface-container); box-shadow: var(--md-shadow-2); }
-.sl-select-panel-scroll { box-sizing: border-box; max-height: 318px; overflow-y: auto; padding: 4px 0; }
+/* 上下不留容器 padding：否则首项上缘/末项下缘各空 4px，option 的 hover 背景盖不到、
+   看起来像一条没变色的边。间距由 option 自身的 10px 上下 padding 提供。 */
+.sl-select-panel-scroll { box-sizing: border-box; max-height: 318px; overflow-y: auto; padding: 0; }
 .sl-select-panel-fixed { position: fixed; z-index: 300; top: auto; left: auto; }
 /* 搜索行固定在面板顶部、在滚动容器之外，滚选项时不跟着走。height 与 SlSelect.vue 的
    SEARCH_ROW_H 必须一致——面板总高和内层 maxHeight 都按它让位。 */
@@ -133,9 +135,6 @@ h1, h2, h3, p { margin: 0; }
 .sl-select-panel-search .sl-input { min-width: 0; flex: 1; height: 100%; outline: 0; }
 .sl-select-panel-search .sl-input { padding: 0; border: 0; background: transparent; color: var(--md-on-surface); }
 .sl-select-empty { padding: 16px 12px; color: var(--md-on-surface-variant); font-size: 13px; text-align: center; }
-/* 透明全屏遮罩：挂一个 fixed 遮罩兜住所有面板外的点击，
-   点击它即关闭（点面板本身由面板的 z-index 更高命中、走选中逻辑）。 */
-.sl-select-backdrop { position: fixed; inset: 0; z-index: 200; background: transparent; }
 .sl-select-option { min-height: 40px; padding: 10px 12px; color: var(--md-on-surface); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sl-select-option:hover { background: var(--md-surface-container-high); }
 .sl-select-option-on { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
@@ -257,8 +256,8 @@ h1, h2, h3, p { margin: 0; }
 /* 虚拟列表上下占位条：撑出未渲染行的高度，让滚动条长度和真实列表一致。 */
 .song-list-spacer { flex: 0 0 auto; width: 100%; }
 .song-row-button { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; border: 0; padding: 0; margin: 0; background: transparent; color: inherit; font: inherit; text-align: inherit; cursor: pointer; outline: none; -webkit-tap-highlight-color: transparent; }
-.song-row:hover { background: var(--md-surface-container-low); }
-.song-row-current { background: var(--md-secondary-container); color: var(--md-on-secondary-container); }
+.song-row:hover { background: var(--md-secondary-container); }
+.song-row-current { color: var(--md-on-secondary-container); }
 .song-index { width: 32px; flex: 0 0 32px; text-align: center; color: var(--md-on-surface-variant); }
 .song-cover { width: 48px; height: 48px; flex: 0 0 48px; border-radius: var(--md-radius-sm); background: var(--md-surface-container-highest); color: var(--md-on-surface-variant); line-height: 48px; text-align: center; overflow: hidden; }
 .song-cover .sl-icon { vertical-align: middle; }
@@ -585,6 +584,13 @@ h1, h2, h3, p { margin: 0; }
 @media (max-width: 599px) {
   :root { --miot-list-height: clamp(128px, calc(100vh - 248px), 100vh); }
   .miot-page { padding: calc(66px + var(--sl-safe-top, 0px)) 12px calc(90px + var(--sl-safe-bottom, 0px)); }
+  /* 列表左右铺满屏幕：抵消 .miot-page 的 12px 内边距，让斑马纹背景与行分隔线
+     贴齐屏幕边缘；行内文字缩进仍由 .song-row-button 自身的 padding 控制。 */
+  .song-list { margin-left: -12px; margin-right: -12px; }
+  /* 自定义滚动条：可见轨道/拇指宽度减 40%，并右移到屏幕最右缘。
+     列表扩展已使其右移 12px，这里把 right 从 4px 收到 1px 补足贴边。 */
+  .miot-scrollbar-track { right: 1px; width: 2.4px; }
+  .miot-scrollbar-thumb { right: 1px; width: 3.6px; }
   .miot-main-appbar-inner, .settings-appbar-inner, .fullscreen-appbar-inner { padding: 0 12px; }
   .player-toolbar { display: block; }
   /* 窄屏改为块布局：把「继续播放」按钮独占一行、与安卓端一致（songloft-org/songloft#478）。
@@ -625,10 +631,15 @@ h1, h2, h3, p { margin: 0; }
   .fullscreen-stage { flex: 1 1 0%; padding-top: 6px; }
   .fullscreen-desktop-stage, .fullscreen-controls-desktop { display: none; }
   .fullscreen-mobile-stage { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; }
-  .fullscreen-mobile-pager { width: 100%; min-height: 0; flex: 1 1 auto; display: flex; overflow-x: auto; overflow-y: hidden; scroll-behavior: auto; overscroll-behavior-x: contain; touch-action: pan-x pan-y; scrollbar-width: none; }
-  .fullscreen-mobile-pager::-webkit-scrollbar { display: none; }
+  /* 分页视口：不再用原生 scroll（WebView 的 fling/橡皮筋会跟 JS 打架导致边界卡住），
+     改为 overflow:hidden 的窗口 + track 用 transform 平移。pan-y 放行歌词页的原生纵向滚动，
+     横向手势完全交给 JS 自己处理。 */
+  .fullscreen-mobile-pager { width: 100%; min-height: 0; flex: 1 1 auto; overflow: hidden; touch-action: pan-y; }
+  .fullscreen-mobile-track { display: flex; width: 100%; height: 100%; will-change: transform; }
   .fullscreen-mobile-slide { min-width: 0; min-height: 0; flex: 0 0 100%; display: flex; align-items: center; justify-content: center; padding: 6px 20px 0; overflow: hidden; }
-  .fullscreen-mobile-slide.fullscreen-lyrics-panel { display: block; padding: 28px 24px; overflow-y: auto; }
+  /* 封面页不吃上下滑：禁掉一切原生手势，横竖都交给 JS 判定（竖滑直接忽略）。 */
+  .fullscreen-mobile-slide.fullscreen-cover-slide { touch-action: none; }
+  .fullscreen-mobile-slide.fullscreen-lyrics-panel { display: block; padding: 28px 24px; overflow-y: auto; touch-action: pan-y; }
   .fullscreen-mobile-slide .fullscreen-cover-frame { width: 72vw; height: 72vw; max-width: 320px; max-height: 320px; }
   .fullscreen-page-indicator { height: 22px; flex: 0 0 22px; display: flex; align-items: center; justify-content: center; gap: 8px; }
   .fullscreen-page-indicator button { width: 6px; height: 6px; padding: 0; border: 0; border-radius: 50%; background: var(--md-outline); transition: width .2s, height .2s, background .2s; }

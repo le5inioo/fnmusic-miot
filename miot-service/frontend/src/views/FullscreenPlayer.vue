@@ -34,9 +34,23 @@ const songArtist = computed(() => {
 });
 let touchStartX = 0;
 let touchStartY = 0;
+let touchStartTime = 0;
 let touchStartPage = 0;
-let mobileScrollTimer = 0;
-let mobileSettledPage = 0;
+let dragging = false;
+let dragAxis: '' | 'x' | 'y' = '';
+const dragOffset = ref(0);
+// 最近一次翻页的目标页，用来掐断 watch(playerPage) 的回环调用，避免重复发起动画
+let pagerTargetPage = 0;
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
+// 分页完全由 transform 驱动，绕开原生 scroll/overscroll —— 移动 WebView 的触摸滚动
+// 跑在合成器线程，JS 的 scrollTo 压不住进行中的 fling/橡皮筋，边界会卡住不回弹。
+// 位移用百分比按页宽计算，窗口尺寸变化时自动适配，无需手动重算。
+const mobileTrackStyle = computed<CSSProperties>(() => ({
+  transform: `translate3d(calc(${-(navigation.playerPage || 0) * 100}% + ${dragOffset.value}px), 0, 0)`,
+  transition: dragging || prefersReducedMotion() ? 'none' : 'transform .3s cubic-bezier(.22,.61,.36,1)',
+}));
 const activeLyric = computed(() => {
   const position = Number(state.player.position || 0);
   let index = -1;
@@ -260,31 +274,23 @@ function close(): void {
   closePage();
 }
 
-function syncMobilePage(): void {
-  const pager = mobilePager.value;
-  if (!pager || pager.clientWidth <= 0) return;
-  const ratio = Math.max(0, Math.min(1, pager.scrollLeft / pager.clientWidth));
-  const page = mobileSettledPage === 0
-    ? (ratio >= 0.12 ? 1 : 0)
-    : (ratio <= 0.88 ? 0 : 1);
-  window.clearTimeout(mobileScrollTimer);
-  mobileScrollTimer = window.setTimeout(() => {
-    const currentPager = mobilePager.value;
-    if (!currentPager || currentPager.clientWidth <= 0) return;
-    mobileSettledPage = page;
-    navigation.playerPage = page;
-    const target = currentPager.clientWidth * page;
-    if (Math.abs(currentPager.scrollLeft - target) > 1) currentPager.scrollLeft = target;
-  }, 120);
+/**
+ * 把分页落到指定页（transform 平滑归位，形成“向左滑入歌词 / 向右滑回封面”的动效）。
+ * 归位只发生在明确动作里（touchend / 点指示器 / 分页状态变化）。
+ */
+function settleMobilePage(index: number): void {
+  const target = Math.max(0, Math.min(1, index));
+  pagerTargetPage = target;
+  navigation.playerPage = target;
+  dragOffset.value = 0;
+  // dragging=false 会让 transition 生效，transform 从拖动中的位置平滑归位到整页。
+  dragging = false;
 }
 
 function showMobilePage(index: number): void {
-  const pager = mobilePager.value;
-  mobileSettledPage = index;
-  navigation.playerPage = index;
-  if (!pager) return;
-  window.clearTimeout(mobileScrollTimer);
-  pager.scrollLeft = pager.clientWidth * index;
+  // settleMobilePage 回写 playerPage 会触发 watch → 再进这里；目标没变就别重启一遍动画。
+  if (index === pagerTargetPage) return;
+  settleMobilePage(index);
 }
 
 function startMobileSwipe(event: TouchEvent): void {
@@ -292,19 +298,42 @@ function startMobileSwipe(event: TouchEvent): void {
   if (!touch) return;
   touchStartX = touch.clientX;
   touchStartY = touch.clientY;
-  touchStartPage = mobilePage.value;
+  touchStartTime = Date.now();
+  touchStartPage = navigation.playerPage || 0;
+  dragging = true;   // 关掉 transition，进入跟手模式
+  dragAxis = '';
+  dragOffset.value = 0;
+}
+
+function moveMobileSwipe(event: TouchEvent): void {
+  if (!dragging) return;
+  const touch = event.touches[0];
+  if (!touch) return;
+  const dx = touch.clientX - touchStartX;
+  const dy = touch.clientY - touchStartY;
+  if (!dragAxis) {
+    if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;   // 死区，避免微小抖动误判方向
+    dragAxis = Math.abs(dx) >= Math.abs(dy) * 0.7 ? 'x' : 'y';
+  }
+  if (dragAxis !== 'x') return;   // 纵向手势交给歌词页原生滚动 / 封面页忽略
+  // 边界阻尼：到头后跟手位移打折，给出“拉不动”的反馈；松手仍会归位到整页，绝不会卡在越界位置。
+  let offset = dx;
+  if ((touchStartPage === 0 && dx > 0) || (touchStartPage === 1 && dx < 0)) offset = dx * 0.3;
+  dragOffset.value = offset;
 }
 
 function finishMobileSwipe(event: TouchEvent): void {
-  const touch = event.changedTouches[0];
-  if (!touch) return;
-  const deltaX = touch.clientX - touchStartX;
-  const deltaY = touch.clientY - touchStartY;
-  if (Math.abs(deltaX) >= 36 && Math.abs(deltaX) > Math.abs(deltaY)) {
-    showMobilePage(Math.max(0, Math.min(1, touchStartPage + (deltaX < 0 ? 1 : -1))));
-    return;
-  }
-  window.setTimeout(syncMobilePage, 80);
+  if (!dragging) return;
+  const dx = dragAxis === 'x' ? dragOffset.value : 0;
+  const elapsed = Math.max(1, Date.now() - touchStartTime);
+  const speed = Math.abs(dx) / elapsed;
+  const width = mobilePager.value?.clientWidth || 1;
+  // 灵敏判定：位移够页宽的 18%，或一次快速轻扫（≥10px 且够快）就翻页。
+  const enoughDistance = Math.abs(dx) >= width * 0.18;
+  const quickFlick = Math.abs(dx) >= 10 && speed >= 0.25;
+  let target = touchStartPage;
+  if (enoughDistance || quickFlick) target += dx < 0 ? 1 : -1;
+  settleMobilePage(target);
 }
 
 async function centerActiveLyric(): Promise<void> {
@@ -330,7 +359,6 @@ onMounted(() => {
 onUnmounted(() => {
   lyricGeneration += 1;
   paletteGeneration += 1;
-  window.clearTimeout(mobileScrollTimer);
 });
 watch(() => state.player.current_song?.id, loadSongDetails);
 watch([() => state.player.current_song?.id, cover, coverMobile], refreshBackgroundPalette, { immediate: true });
@@ -382,25 +410,28 @@ watch(() => navigation.playerPage, showMobilePage);
             <div
               ref="mobilePager"
               class="fullscreen-mobile-pager"
-              @scroll.passive="syncMobilePage"
               @touchstart.passive="startMobileSwipe"
+              @touchmove.passive="moveMobileSwipe"
               @touchend="finishMobileSwipe"
+              @touchcancel="finishMobileSwipe"
             >
-              <section class="fullscreen-mobile-slide" aria-label="歌曲封面">
-                <div class="fullscreen-cover-frame">
-                  <img v-if="coverMobile" :key="coverMobileEpoch" class="fullscreen-cover" :src="coverMobile" :alt="state.player.current_song?.title || '歌曲封面'" @error="onCoverMobileError" @load="onCoverMobileLoad" />
-                  <div v-else class="fullscreen-cover player-cover-empty"><SlIcon name="music_note" :size="44" player-icon /></div>
-                </div>
-              </section>
-              <section ref="mobileLyrics" class="fullscreen-mobile-slide lyrics fullscreen-lyrics-panel" aria-label="歌词">
-                <template v-if="lyrics.length">
-                  <div v-for="(line, index) in lyrics" :key="`${line.time}-${index}`" class="lyric-line" :class="{ active: index === activeLyric }">{{ line.text }}</div>
-                </template>
-                <div v-else class="lyrics-empty">
-                  <span role="status">{{ lyricLoading ? '正在获取歌词…' : lyricError || '暂无歌词，请确认已安装并启用歌词搜索插件' }}</span>
-                  <SlButton v-if="state.player.current_song" variant="text" label="重新获取歌词" :disabled="lyricLoading" @click="retryLyrics" />
-                </div>
-              </section>
+              <div class="fullscreen-mobile-track" :style="mobileTrackStyle">
+                <section class="fullscreen-mobile-slide fullscreen-cover-slide" aria-label="歌曲封面">
+                  <div class="fullscreen-cover-frame">
+                    <img v-if="coverMobile" :key="coverMobileEpoch" class="fullscreen-cover" :src="coverMobile" :alt="state.player.current_song?.title || '歌曲封面'" @error="onCoverMobileError" @load="onCoverMobileLoad" />
+                    <div v-else class="fullscreen-cover player-cover-empty"><SlIcon name="music_note" :size="44" player-icon /></div>
+                  </div>
+                </section>
+                <section ref="mobileLyrics" class="fullscreen-mobile-slide lyrics fullscreen-lyrics-panel" aria-label="歌词">
+                  <template v-if="lyrics.length">
+                    <div v-for="(line, index) in lyrics" :key="`${line.time}-${index}`" class="lyric-line" :class="{ active: index === activeLyric }">{{ line.text }}</div>
+                  </template>
+                  <div v-else class="lyrics-empty">
+                    <span role="status">{{ lyricLoading ? '正在获取歌词…' : lyricError || '暂无歌词，请确认已安装并启用歌词搜索插件' }}</span>
+                    <SlButton v-if="state.player.current_song" variant="text" label="重新获取歌词" :disabled="lyricLoading" @click="retryLyrics" />
+                  </div>
+                </section>
+              </div>
             </div>
             <div class="fullscreen-page-indicator" aria-label="播放器页面">
               <button type="button" :class="{ active: mobilePage === 0 }" aria-label="显示封面" @click="showMobilePage(0)"></button>

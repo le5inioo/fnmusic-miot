@@ -11,15 +11,15 @@ const error = computed(() => {
 
 <template>
   <label class="ai-headers-field">
-    <span>自定义请求头（可选，JSON 对象）</span>
+    <span class="ai-headers-label">自定义请求头（选填，JSON对象）</span>
     <textarea class="sl-input ai-headers-input" :aria-label="label" :aria-invalid="!!error" :value="modelValue" placeholder='{"x-opencode-session":"固定的会话 ID"}' spellcheck="false" @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)" @change="emit('change')"></textarea>
-    <small>留空表示不添加。应用于此连接的模型列表、问答和分析请求；不能覆盖认证、JSON 类型或超时等内置请求头。</small>
     <small v-if="error" role="alert" class="ai-headers-error">{{ error }}</small>
   </label>
 </template>
 
 <style scoped>
 .ai-headers-field { display: grid; gap: 8px; margin-block: 12px; min-width: 0; }
+.ai-headers-label { color: var(--md-on-surface-variant); font-size: 12px; font-weight: 400; }
 .ai-headers-input { min-height: 84px; resize: vertical; width: 100%; box-sizing: border-box; }
 .ai-headers-error { color: var(--md-error); }
 </style>

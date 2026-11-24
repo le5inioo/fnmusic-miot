@@ -9,7 +9,7 @@ import { URLBuilder, playbackOptionsOf } from '../player/url_builder';
 import { ConfigManager } from '../config/manager';
 import { IndexingManager } from '../indexing/manager';
 import { GroupCoordinator } from '../group/coordinator';
-import type { ExternalSearchSource, PlayMode } from '../types';
+import type { ExternalSearchSource } from '../types';
 import type { PlaylistManager } from '../player/manager';
 
 // 外部搜索 API 请求体
@@ -328,7 +328,7 @@ export class OnlineSearcher {
         songloft.log.info('[OnlineSearcher] [Diag] No-import direct push: songName="' + songName + '" url="' + pushUrl + '"' + (transcoded ? ' (transcoded)' : ''));
         if (pm && indexingManager) {
           // id=0 只存在于临时队列，不写曲库，也不对它发送已播放/收藏请求。
-          return pm.playStandaloneSong({ ...song, id: 0, url: pushUrl, type: 'remote', duration: song.duration || 0 } as any, indexingManager);
+          return pm.playOneOffSong({ ...song, id: 0, url: pushUrl, type: 'remote', duration: song.duration || 0 } as any, '单曲: ' + song.title);
         }
         const played = await minaService.playURL(accountId, deviceId, pushUrl, {
           title: song.title,
@@ -373,44 +373,22 @@ export class OnlineSearcher {
       } catch (e) { songloft.log.warn(`[OnlineSearcher] 追加歌单失败: ${String(e)}`); }
     }
 
-    // 已追加到目标歌单且提供了播放管理器：接管为完整歌单播放，从这首新歌
-    // 开始，播完后由 PlaylistManager 的切歌定时器自动续播歌单其余歌曲。
-    // （直接 playURL 单曲推送不会注册切歌定时器，播完即停，见 issue #53）
-    if (pm && appendedPlaylistId !== undefined) {
-      let playMode: PlayMode = 'order';
-      try {
-        const devices = await this.configManager.getDevices(accountId);
-        const devCfg = devices.find((d) => d.device_id === deviceId);
-        if (devCfg && devCfg.play_mode) playMode = devCfg.play_mode as PlayMode;
-      } catch (e) {
-        songloft.log.warn('[OnlineSearcher] Failed to read play mode, fallback to order: ' + String(e));
+    // 语音搜索点歌统一单曲模式：即使配置了导入歌单，也只播这一首；
+    // 播完由 PlaylistManager 接 收藏 → 猜你喜欢 → 全部歌曲，不再整歌单接管。
+    if (pm) {
+      if (indexingManager) {
+        indexingManager.addImportedSong(
+          { id: imported.id, title: song.title, artist: song.artist, album: song.album },
+          appendedPlaylistId,
+        );
       }
-
-      const ok = await pm.playPlaylistFromSong(appendedPlaylistId, imported.id, playMode);
-      if (ok) {
-        // 增量把这首独立远程歌曲加入内存索引，避免为一首歌重建全部歌单缓存。
-        if (indexingManager) {
-          indexingManager.addImportedSong(
-            { id: imported.id, title: song.title, artist: song.artist, album: song.album },
-            appendedPlaylistId,
-          );
-        }
-        songloft.log.info(`[OnlineSearcher] Playing online song via playlist ${appendedPlaylistId} (auto-continue): ${song.title} - ${song.artist}`);
-        return true;
-      }
-      songloft.log.warn(`[OnlineSearcher] Playlist takeover failed for playlist ${appendedPlaylistId}, falling back to single URL push`);
-    }
-
-    // 没有目标歌单时，导入歌曲与已入库的独立歌曲共用临时歌手队列。
-    if (pm && indexingManager) {
-      indexingManager.addImportedSong({ id: imported.id, title: song.title, artist: song.artist, album: song.album });
       let fullSong: any = { ...song, id: imported.id, url: imported.url, type: 'remote' };
       try {
         fullSong = await songloft.songs.getById(imported.id) || fullSong;
       } catch (e) {
         songloft.log.warn('[OnlineSearcher] Failed to read imported song detail: ' + String(e));
       }
-      return pm.playStandaloneSong(fullSong, indexingManager);
+      return pm.playOneOffSong(fullSong, '单曲: ' + song.title);
     }
 
     // 用返回的 url 构造完整播放 URL（相对路径，URLBuilder 会拼接 server_host 和 token）。

@@ -3,6 +3,7 @@ import App from './App.vue';
 import { installListCoverVisibilityRecovery } from './covers';
 import './style.css';
 import './styles/redesign.css';
+import './styles/fnos-card.css';
 
 // fnOS 独立部署没有 Songloft 宿主注入的 window.SongloftPlugin。
 // api.ts / runtime.ts / covers.ts 的 browser fallback 全部走可选链，缺宿主时

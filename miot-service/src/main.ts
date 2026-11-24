@@ -85,8 +85,11 @@ let memoryService: MemoryService;
 let dlnaReceiver: DLNAReceivers;
 let aiChat: AIChatService;
 let voiceDispatcher: VoiceDispatcher;
+// 启动索引重试的停机标志：onDeinit 置位后，后台退避重试立即停止，避免停机/热重载后空转。
+let bootIndexRetryStop = false;
 
 async function onInit(): Promise<void> {
+  bootIndexRetryStop = false;
   songloft.log.info('MIoT 智能音箱插件初始化...');
 
   // 初始化管理器
@@ -174,21 +177,24 @@ async function onInit(): Promise<void> {
   authService.autoLoginAll().catch(e => {
     songloft.log.error('autoLoginAll failed: ' + String(e));
   });
-  // 异步刷新索引，不阻塞插件初始化
+  // 异步刷新索引，不阻塞插件初始化。
+  // NAS 重启后本插件常比飞牛音乐后端先就绪，首次 refresh 会命中 502 / Connection refused；
+  // 改用 refreshWithRetry 做退避重试，等后端起来后自动建好索引，根治「重启后歌单为 0、
+  // 语音找不到歌单」。只有刷新成功（含空曲库）后才恢复临时歌手歌单，避免空索引时误恢复。
   setTimeout(() => {
-    indexingManager.refresh().then(async () => {
+    indexingManager.refreshWithRetry(() => bootIndexRetryStop).then(async (result) => {
+      if (bootIndexRetryStop || !result.success) return;
       // 必须等歌单歌曲缓存加载完再恢复：临时歌手歌单靠 findSongsByArtist 重建，
       // 而 refresh() resolve 时缓存还在后台加载，结果必然为空——旧代码因此永远恢复不了，
       // 还会把 pendingTempArtist 清空（songloft-org/songloft-plugin-miot#62）。
-      // 不在语音热路径上，等待预算给大。索引本身没建起来（宿主 API 不可用）时不必白等。
-      if (indexingManager.isIndexReady()) {
-        await indexingManager.waitForPlaylistCache(30_000);
-      }
+      // 不在语音热路径上，等待预算给大。
+      await indexingManager.waitForPlaylistCache(30_000);
+      if (bootIndexRetryStop) return;
       await playlistManagerMap.restoreTempPlaylists(indexingManager).catch(e => {
         songloft.log.warn('restoreTempPlaylists failed: ' + String(e));
       });
     }).catch(e => {
-      songloft.log.error('indexingManager.refresh failed: ' + String(e));
+      songloft.log.error('indexingManager.refreshWithRetry failed: ' + String(e));
     });
   }, 100);
 
@@ -214,6 +220,7 @@ async function onInit(): Promise<void> {
 }
 
 async function onDeinit(): Promise<void> {
+  bootIndexRetryStop = true;
   songloft.log.info('MIoT 智能音箱插件停止...');
   voiceDispatcher?.close();
   aiChat?.close();

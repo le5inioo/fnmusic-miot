@@ -1,5 +1,5 @@
 [Unit]
-Description=fnmusic-miot Miot小爱音箱控制层
+Description=fnmusic-miot Miotunes 控制层
 Documentation=https://github.com/javycoder/fnos_music_ext
 After=network-online.target
 Wants=network-online.target

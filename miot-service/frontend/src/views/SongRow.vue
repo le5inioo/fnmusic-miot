@@ -107,7 +107,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="song-row" :class="{ 'song-row-current': isCurrent() }">
+  <div class="song-row" :class="{ 'song-row-current': isCurrent(), 'song-row-odd': index % 2 === 0 }">
     <button type="button" class="song-row-button" @click="emit('play', song, index)">
       <span class="song-index">
         <SlIcon v-if="isCurrent() && state.player.is_playing" name="equalizer" :size="18" />

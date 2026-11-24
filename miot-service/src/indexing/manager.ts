@@ -728,6 +728,39 @@ export class IndexingManager {
     }
   }
 
+  /**
+   * 启动时的索引刷新（带失败重试）。
+   *
+   * 飞牛 NAS 重启后，本插件常比飞牛音乐后端先就绪：首次 refresh 会命中
+   * Connection refused / HTTP 502，旧代码只试一次就永久停在空索引
+   * （面板歌单 0、语音找不到歌单），且没有定时全局刷新来兜底。
+   * 这里按退避间隔反复重试，直到 refresh 成功（含空曲库这一合法结果）。
+   *
+   * @param shouldStop 返回 true 时中止重试（插件停机/热重载），避免后台空转
+   * @param delaysMs   每次尝试前的等待；首项 0 = 立即尝试。总窗口约 75s，
+   *                   覆盖飞牛音乐服务的常见启动时长
+   */
+  async refreshWithRetry(
+    shouldStop?: () => boolean,
+    delaysMs: number[] = [0, 3000, 6000, 12000, 24000, 30000],
+  ): Promise<RefreshResult> {
+    let last: RefreshResult = { success: false, songCount: 0, playlistCount: 0 };
+    for (let attempt = 0; attempt < delaysMs.length; attempt++) {
+      if (shouldStop?.()) return last;
+      if (delaysMs[attempt] > 0) await sleep(delaysMs[attempt]);
+      if (shouldStop?.()) return last;
+      last = await this.refresh();
+      if (last.success) return last;
+      const more = attempt + 1 < delaysMs.length;
+      songloft.log.warn(
+        `[Indexing] 启动索引刷新第 ${attempt + 1}/${delaysMs.length} 次失败` +
+        `（飞牛音乐后端可能尚未就绪）` +
+        (more ? `，${delaysMs[attempt + 1]}ms 后重试` : `，已达重试上限；可手动 POST /indexing/refresh`),
+      );
+    }
+    return last;
+  }
+
   async waitForReady(timeoutMs = 5000): Promise<boolean> {
     if (this.indexReady) {
       return true;

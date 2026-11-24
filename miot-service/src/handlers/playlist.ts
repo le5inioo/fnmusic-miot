@@ -431,7 +431,7 @@ export function registerPlaylistHandlers(
   router.post('/player/play', async (req: HTTPRequest) => {
     try {
       const body = parseBody(req);
-      const { account_id, device_id, playlist_id, start_index, play_mode, song_id, start_position } = body;
+      const { account_id, device_id, playlist_id, start_index, play_mode, song_id, start_position, one_off } = body;
 
       if (!account_id) {
         return jsonResponse({ success: false, error: 'account_id is required' });
@@ -466,6 +466,29 @@ export function registerPlaylistHandlers(
       // 起始歌曲优先按 song_id 定位：调用方（网页列表）的下标可能基于一份已过期的歌单快照，
       // 与服务端此刻拉到的顺序错位就会播成邻近的歌（#59）。song_id 找不到时才退回下标。
       manager.setAnnounceOnSongChange(false);
+      // 搜索态点本地结果：只播这一首，播完由 PlaylistManager 接 收藏 → 猜你喜欢 → 全部歌曲。
+      // one_off 只由搜索页传入，普通歌单点歌/继续播放完全不受影响。
+      if (one_off === true && songId > 0) {
+        try {
+          const oneOffSong: any = await songloft.songs.getById(songId);
+          if (oneOffSong && oneOffSong.url
+            && await manager.playOneOffSong(oneOffSong, '单曲: ' + (oneOffSong.title || ''))) {
+            return jsonResponse({
+              success: true,
+              data: {
+                message: 'single song started',
+                playlist_id: manager.getStatus().playlist_id,
+                play_mode: 'singlePlay',
+                current_index: manager.getStatus().current_index,
+                current_song: manager.getCurrentSong(),
+              },
+            });
+          }
+          songloft.log.warn(`[player/play] one-off song ${songId} unavailable, falling back to playlist playback`);
+        } catch (e) {
+          songloft.log.warn(`[player/play] one-off song lookup failed: ${String(e)}`);
+        }
+      }
       let ok: boolean;
       if (isTempPlaylistId(playlistId)) {
         // 临时歌单（语音「播放歌手XX」等）只存在于内存，没法按 ID 重新拉取
@@ -505,6 +528,44 @@ export function registerPlaylistHandlers(
           current_song: manager.getCurrentSong(),
         },
       });
+    } catch (e: any) {
+      return jsonResponse({ success: false, error: e.message || String(e) });
+    }
+  });
+
+  // POST /player/play-online - 播放在线搜索直链，并把歌曲加载进播放队列
+  // 与 /mina/play-url 的关键区别：后者只推 URL 给音箱，不碰 PlaylistManager 内存队列，
+  // 于是 /player/status 的 current_song 永远是旧歌，网页播放器信息不会更新。
+  // 这里复用语音在线点播同款 playWithSongs()：URLBuilder 对 http(s) 直链原样返回，
+  // 推给音箱的 URL 与 /mina/play-url 完全一致，同时 current_song/进度/自动切歌一并就位。
+  // id=0 与语音 no-import 分支一致：跳过预取、已播放上报与持久化。
+  router.post('/player/play-online', async (req: HTTPRequest) => {
+    try {
+      const body = parseBody(req);
+      const { account_id, device_id, url, title, artist, cover_url, duration } = body;
+      if (!account_id) {
+        return jsonResponse({ success: false, error: 'account_id is required' });
+      }
+      if (!device_id || !url) {
+        return jsonResponse({ success: false, error: 'device_id and url are required' });
+      }
+      const manager = await playlistManagerMap.getOrCreate(account_id, device_id);
+      const song = {
+        id: 0,
+        type: 'remote',
+        title: String(title || ''),
+        artist: String(artist || ''),
+        album: '',
+        duration: Math.max(0, Number(duration) || 0),
+        url: String(url),
+        cover_url: String(cover_url || ''),
+      } as any;
+      // 搜索点歌统一单曲模式：播完跳 收藏 → 猜你喜欢 → 全部歌曲。
+      const ok = await manager.playOneOffSong(song as any, '单曲: ' + song.title);
+      if (!ok) {
+        return jsonResponse({ success: false, error: 'failed to play online song' });
+      }
+      return jsonResponse({ success: true, data: manager.getStatus() });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
     }

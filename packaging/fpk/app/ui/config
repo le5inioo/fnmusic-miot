@@ -1,7 +1,7 @@
 {
     ".url": {
         "fnmusic-miot.main": {
-            "title": "Miot小爱音箱",
+            "title": "Miotunes",
             "desc": "小米/红米音箱控制：设备管理 / 语音口令 / 播放 / 设置（可全屏、可调字号）",
             "icon": "images/miot_{0}.png",
             "type": "iframe",

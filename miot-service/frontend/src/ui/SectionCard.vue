@@ -16,20 +16,20 @@ withDefaults(
 
 <template>
   <section class="miot-section" :class="`miot-section-${tone}`">
-    <header class="section-heading">
-      <span v-if="icon" class="section-heading-icon" aria-hidden="true">
-        <SlIcon :name="icon" :size="20" />
-      </span>
-      <span class="section-heading-copy">
-        <span class="section-title-row">
-          <h2 class="section-title">{{ title }}</h2>
-          <span v-if="$slots.actions" class="section-heading-actions"><slot name="actions" /></span>
-        </span>
-        <span v-if="description" class="section-description">{{ description }}</span>
-      </span>
-    </header>
     <div class="card miot-card" :class="{ 'miot-card-flat': flat }">
-      <slot />
+      <header class="section-heading">
+        <span v-if="icon" class="section-heading-icon" aria-hidden="true">
+          <SlIcon :name="icon" :size="20" />
+        </span>
+        <span class="section-heading-copy">
+          <span class="section-title-row">
+            <h2 class="section-title">{{ title }}</h2>
+            <span v-if="$slots.actions" class="section-heading-actions"><slot name="actions" /></span>
+          </span>
+          <span v-if="description" class="section-description">{{ description }}</span>
+        </span>
+      </header>
+      <div class="section-card-content"><slot /></div>
     </div>
   </section>
 </template>

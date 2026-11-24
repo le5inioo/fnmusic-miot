@@ -13,20 +13,11 @@ import SlSelect from '../ui/SlSelect.vue';
 import SlEmptyState from '../ui/SlEmptyState.vue';
 import { openSelect } from '../ui/selectState';
 import { navigation, openPage } from '../runtime';
-import { confirmAction, currentDevice, deviceName, lastPlayedSong, messageOf, playlistLabel, playSong, refreshAll, removeSongFromPlaylist, resumePlaylist, selectPlaylist, state, visibleSongs } from '../store';
+import { confirmAction, currentDevice, deviceName, ensureLibrarySongs, lastPlayedSong, messageOf, playlistLabel, playSong, refreshAll, removeSongFromPlaylist, resumePlaylist, searchIsGlobal, selectPlaylist, state, visibleSongs } from '../store';
 import type { SelectOption, Song } from '../types';
 
 const playlistOptions = computed<SelectOption[]>(() => state.playlists.map((p) => ({ value: String(p.id), label: playlistLabel(p), searchText: p.name })));
 const noServerHint = computed(() => !state.config.server_host || state.config.server_host_status === 'loopback');
-// 有进度记录 + 有设备才给「继续播放」。歌曲列表未必已加载完（歌名靠它取），
-// 所以只用 playlistProgress 判断能不能续播，歌名有就显示在 title 里。
-const canResume = computed(() => {
-  if (!state.selectedPlaylistId || !currentDevice.value) return false;
-  if (!state.playlistProgress?.song_id) return false;
-  // 音箱此刻正播/正暂停在这个歌单上就不给「继续」：那一按等于把当前这首从头重放
-  const onThisPlaylist = String(state.player.playlist_id ?? '') === state.selectedPlaylistId;
-  return !(onThisPlaylist && (state.player.state === 'playing' || state.player.state === 'paused'));
-});
 const resumeTitle = computed(() => {
   const song = lastPlayedSong.value;
   return song ? `从上次播放的《${song.title || '未知歌曲'}》继续` : '从上次播放的那首继续';
@@ -273,8 +264,15 @@ async function play(song: Song, index: number) {
 // 临时歌单（id<0，语音"播放歌手X"生成的一次性队列）不允许"删除"：它本来就不落库，
 // 用户想要的语义只对真实歌单成立。songRemovable 也据此隐藏 SongRow 的按钮。
 const songRemovable = computed(() => {
+  // 搜索态显示的是整个本地库的结果，不是当前歌单成员；此时"从歌单删除"语义不符，隐藏删除按钮。
+  if (searchIsGlobal.value) return false;
   const id = Number(state.selectedPlaylistId);
   return Number.isFinite(id) && id > 0;
+});
+
+// 搜索关键词时懒加载全库，供上方列表跨歌单匹配。
+watch(() => state.songSearch, (v) => {
+  if (String(v || '').trim()) void ensureLibrarySongs();
 });
 async function removeSong(song: Song) {
   const result = await confirmAction(
@@ -363,7 +361,7 @@ onUnmounted(() => {
 <template>
   <div class="miot-main-appbar">
     <div class="miot-main-appbar-inner">
-      <AppBar title="Miot小爱音箱" :subtitle="state.deviceConnecting ? '正在连接音箱…' : currentDevice ? `${deviceName(currentDevice)} · ${state.player.is_playing ? '播放中' : '待机'}` : '请选择播放设备'">
+      <AppBar title="Miotunes" :subtitle="state.deviceConnecting ? '正在连接音箱…' : currentDevice ? `${deviceName(currentDevice)} · ${state.player.is_playing ? '播放中' : '待机'}` : '请选择播放设备'">
         <SlButton variant="icon" icon="speaker_group" title="选择设备" @click="openDevicePicker" />
         <SlButton variant="icon" icon="refresh" title="刷新" :disabled="state.refreshing" @click="refreshAll" />
         <SlButton variant="icon" icon="settings" title="设置" @click="openPage('settings')" />
@@ -385,9 +383,8 @@ onUnmounted(() => {
       <div class="toolbar-field">
         <SlSelect leading-icon="queue_music" :model-value="state.selectedPlaylistId" :options="playlistOptions" placeholder="选择播放歌单" allow-empty searchable search-placeholder="搜索歌单" aria-label="选择歌单" @update:model-value="onPlaylist" />
       </div>
-      <!-- 有上次播放记录才出现：从这个歌单自己的进度接着播，不受中间切过别的歌单影响 -->
+      <!-- 始终显示：从这个歌单自己的进度接着播，不受中间切过别的歌单影响 -->
       <SlButton
-        v-if="canResume"
         variant="tonal"
         icon="play_arrow"
         label="继续播放"

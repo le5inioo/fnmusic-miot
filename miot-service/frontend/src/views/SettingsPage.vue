@@ -18,7 +18,7 @@ const isNarrow = ref(typeof window !== 'undefined' && window.innerWidth < 600);
 // 避免模板里直接写 __APP_VERSION__ 被编译成渲染上下文属性访问。
 const appVersion = __APP_VERSION__;
 const categories = [
-  { id: 'device', title: '设备', subtitle: '服务器、账号和设备分组', icon: 'speaker_group', component: DeviceSettings },
+  { id: 'device', title: '设备', subtitle: '服务器、账号和设备分组', icon: 'speaker', component: DeviceSettings },
   { id: 'playback', title: '播放', subtitle: '格式、音量和触屏显示', icon: 'music_note', component: PlaybackSettings },
   { id: 'voice', title: '语音', subtitle: '监听、口令和搜索', icon: 'record_voice_over', component: VoiceSettings },
   { id: 'ai', title: 'AI 设置', subtitle: '模型连接、口令分析、对话与记忆', icon: 'auto_awesome', component: AISettings },
@@ -58,8 +58,7 @@ function categoryStatus(category: (typeof categories)[number]): { label: string;
   if (category.id === 'device' && state.portSetupPending) return { label: '待设置', tone: 'warning' };
   return null;
 }
-const showMobileMenu = computed(() => isNarrow.value && !navigation.settingsCategory);
-const appbarTitle = computed(() => isNarrow.value && navigation.settingsCategory ? currentCategory.value.title : '设置');
+const appbarTitle = computed(() => isNarrow.value ? currentCategory.value.title : '设置');
 const settingsBody = ref<HTMLElement | null>(null);
 const settingsContent = ref<HTMLElement | null>(null);
 const mobileMenu = ref<HTMLElement | null>(null);
@@ -78,10 +77,14 @@ function setCategory(id: string) {
   void nextTick(resetSettingsViewport);
 }
 function close() { resetSettingsViewport(); navigation.settingsCategory = ''; closePage(); }
+function bottomTabLabel(category: (typeof categories)[number]): string {
+  if (category.id === 'ai') return 'AI';
+  if (category.id === 'toolbox') return '工具';
+  return category.title;
+}
 function back() {
   resetSettingsViewport();
-  if (isNarrow.value && navigation.settingsCategory) navigation.settingsCategory = '';
-  else closePage();
+  closePage();
 }
 function updateWidth() { isNarrow.value = window.innerWidth < 600; }
 onMounted(() => window.addEventListener('resize', updateWidth));
@@ -93,23 +96,18 @@ onUnmounted(() => window.removeEventListener('resize', updateWidth));
     <div class="settings-appbar-shell">
       <div class="settings-appbar-inner">
         <AppBar :title="appbarTitle" back @back="back">
-          <SlStatusChip v-if="state.configSaving" label="保存中" tone="info" icon="save" />
           <span class="settings-version" :title="`版本 v${appVersion}`">v{{ appVersion }}</span>
         </AppBar>
       </div>
     </div>
     <div ref="settingsBody" class="settings-scroll-body">
     <div class="settings-shell">
-      <div v-if="showMobileMenu" ref="mobileMenu" class="settings-mobile-menu">
-        <button v-for="category in categories" :key="category.id" class="settings-nav-item" @click="setCategory(category.id)">
-          <span class="settings-nav-icon"><SlIcon :name="category.icon" :size="20" /></span>
-          <span class="settings-nav-copy"><strong class="settings-nav-title">{{ category.title }}</strong><small class="settings-nav-subtitle">{{ categorySubtitle(category) }}</small></span>
-          <SlStatusChip v-if="categoryStatus(category)" :label="categoryStatus(category)!.label" :tone="categoryStatus(category)!.tone" />
-          <SlIcon name="chevron_right" :size="20" />
-        </button>
-      </div>
-      <div v-else class="settings-layout">
+      <div class="settings-layout">
         <nav class="settings-nav" aria-label="设置分类">
+          <button class="settings-nav-home" @click="close">
+            <span class="settings-nav-home-icon"><SlIcon name="arrow_back" :size="18" /></span>
+            <span>返回主页</span>
+          </button>
           <button v-for="category in categories" :key="category.id" class="settings-nav-item" :class="{ active: category.id === currentCategory.id }" @click="setCategory(category.id)">
             <span class="settings-nav-icon"><SlIcon :name="category.icon" :size="20" /></span>
             <span class="settings-nav-copy"><strong class="settings-nav-title">{{ category.title }}</strong><small class="settings-nav-subtitle">{{ categorySubtitle(category) }}</small></span>
@@ -123,11 +121,22 @@ onUnmounted(() => window.removeEventListener('resize', updateWidth));
               <h1>{{ currentCategory.title }}</h1>
               <p>{{ categorySubtitle(currentCategory) }}</p>
             </div>
+            <SlStatusChip v-if="state.configSaving" label="保存中" tone="info" icon="save" />
           </div>
           <component :is="currentCategory.component" />
         </section>
       </div>
     </div>
     </div>
+    <nav v-if="isNarrow" class="settings-bottom-tabs" aria-label="设置分类">
+      <button class="settings-bottom-tab settings-bottom-tab-back" @click="close">
+        <span class="settings-bottom-tab-icon"><SlIcon name="queue_music" :size="26" /></span>
+        <span class="settings-bottom-tab-label">音乐</span>
+      </button>
+      <button v-for="category in categories" :key="category.id" class="settings-bottom-tab" :class="{ active: category.id === currentCategory.id }" @click="setCategory(category.id)">
+        <span class="settings-bottom-tab-icon"><SlIcon :name="category.icon" :size="22" /></span>
+        <span class="settings-bottom-tab-label">{{ bottomTabLabel(category) }}</span>
+      </button>
+    </nav>
   </div>
 </template>

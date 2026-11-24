@@ -10,11 +10,18 @@ import SlSwitch from '../../ui/SlSwitch.vue';
 import { hostPathPrefix } from '../../api';
 import { currentDevice, deviceName, messageOf, notify, playerCommand, saveConfig, state } from '../../store';
 
+const appVersion = __APP_VERSION__;
+
 const url = ref('https://lhttp.qtfm.cn/live/4915/64k.mp3');
 const text = ref('');
-const targetLabel = computed(() =>
-  currentDevice.value ? deviceName(currentDevice.value) : '未选择设备',
-);
+const targetLabel = computed(() => {
+  const device = currentDevice.value;
+  if (!device) return '未选择设备';
+  // 型号优先取 model；小米音箱的 model 常为空，真正的型号在 hardware（如 OH2P）。
+  // 两者都没有时不拼分隔符，避免出现「智能音箱 · 」。
+  const model = device.model?.trim() || device.hardware?.trim() || '';
+  return model ? `${deviceName(device)} · ${model}` : deviceName(device);
+});
 async function sendUrl() {
   if (!url.value.trim()) return;
   try {
@@ -79,8 +86,7 @@ async function exportDiagnostics(): Promise<void> {
 <template>
   <div class="toolbox-target-card">
     <div>
-      <span class="settings-header-eyebrow">当前操作目标</span><strong>{{ targetLabel }}</strong
-      ><small>文字播报发送到这台设备；URL 播放会同步到它所在的设备分组。</small>
+      <span class="settings-header-eyebrow">当前操作目标</span><strong>{{ targetLabel }}</strong>
     </div>
     <SlStatusChip
       :label="currentDevice ? '已就绪' : '不可用'"
@@ -88,11 +94,7 @@ async function exportDiagnostics(): Promise<void> {
       :icon="currentDevice ? 'speaker' : 'warning'"
     />
   </div>
-  <SectionCard
-    title="URL 播放"
-    icon="link"
-    description="将音频 URL 推送到当前选中的设备或设备分组。URL 必须能从音箱所在网络访问。"
-  >
+  <SectionCard title="URL 播放" icon="link">
     <div class="form-body">
       <div class="inline-fields">
         <SlInput
@@ -105,11 +107,7 @@ async function exportDiagnostics(): Promise<void> {
       </div>
     </div>
   </SectionCard>
-  <SectionCard
-    title="文字播报"
-    icon="record_voice_over"
-    description="使用当前设备的 TTS 播报文字。"
-  >
+  <SectionCard title="文字播报" icon="record_voice_over">
     <div class="form-body">
       <div class="inline-fields">
         <SlInput
@@ -129,14 +127,6 @@ async function exportDiagnostics(): Promise<void> {
   </SectionCard>
   <SectionCard title="操作结果" icon="terminal">
     <div class="form-body">
-      <div class="field-actions">
-        <SlButton
-          variant="text"
-          label="清空记录"
-          icon="delete_sweep"
-          @click="state.operationLog = []"
-        />
-      </div>
       <div v-for="item in state.operationLog" :key="item.id" class="list-item">
         <div class="list-item-copy">
           <strong class="list-item-title" :title="item.ttsText || item.message">{{
@@ -163,39 +153,42 @@ async function exportDiagnostics(): Promise<void> {
         v-if="!state.operationLog.length"
         compact
         title="暂无操作记录"
-        description="文字播报结果和操作失败信息会显示在这里。"
-        icon="terminal"
+        class="toolbox-empty-state"
       />
+      <div class="field-actions toolbox-log-actions">
+        <SlButton
+          variant="text"
+          label="清空记录"
+          icon="delete_sweep"
+          @click="state.operationLog = []"
+        />
+      </div>
     </div>
   </SectionCard>
-  <SectionCard
-    title="调试与诊断"
-    icon="bug_report"
-    description="遇到 bug 时：先打开调试日志 → 复现问题（记下大概时间）→ 导出日志发给开发者。"
-  >
+  <SectionCard title="调试与诊断" icon="bug_report" class="toolbox-debug-card">
     <div class="form-body">
-      <SettingRow
-        title="全局调试日志"
-        subtitle="开启后控制层输出音箱推流访问日志与会话轮询诊断日志；日常使用建议关闭"
-      >
+      <SettingRow title="全局调试日志">
         <SlSwitch
           aria-label="全局调试日志"
           :model-value="state.config.debug_log_enabled"
           @update:model-value="setDebugLogEnabled"
         />
       </SettingRow>
-      <div class="field-actions">
-        <SlButton
-          variant="outlined"
-          label="导出诊断日志"
-          icon="download"
-          :disabled="debugExporting"
-          @click="exportDiagnostics"
-        />
+      <div class="toolbox-export-row">
+        <p class="field-help toolbox-export-hint">
+          遇到BUG，先打开开关，再复现BUG，再导出日志。
+        </p>
+        <div class="field-actions toolbox-export-actions">
+          <SlButton
+            variant="outlined"
+            label="导出日志"
+            icon="download"
+            :disabled="debugExporting"
+            @click="exportDiagnostics"
+          />
+        </div>
       </div>
-      <p class="field-help">
-        导出内容为控制层与控制台网关最近 2000 行运行日志及版本信息；日志中可能包含设备或账号 ID，请仅提供给开发者用于排查。
-      </p>
     </div>
   </SectionCard>
+  <div class="toolbox-version">v{{ appVersion }}</div>
 </template>

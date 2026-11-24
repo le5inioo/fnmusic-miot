@@ -15,7 +15,6 @@ const emit = defineEmits<{ 'update:modelValue': [VoicePanel] }>();
     <div class="voice-settings-heading">
       <span class="settings-header-eyebrow">语音中枢</span>
       <strong>选择要配置的能力</strong>
-      <span>基础监听、口令、记忆与智能搜索互相独立，按需逐项启用。</span>
     </div>
     <nav class="voice-section-nav" aria-label="语音设置分类">
       <button

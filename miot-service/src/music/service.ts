@@ -1792,12 +1792,29 @@ export class MusicCommandService {
   private async findLibrarySongCandidate(songName: string): Promise<SongSearchCandidate | null> {
     const started = Date.now();
     try {
+      // 两个开关分别控制飞牛本地曲库 / ext 联网音源；缺省视为开启，兼容旧配置。
+      const cfg = await this.configManager.getConfig();
+      const allowLocal = cfg.fnmusic_local_search_enabled !== false;
+      const allowOnline = cfg.fnmusic_online_search_enabled !== false;
+      if (!allowLocal && !allowOnline) {
+        songloft.log.info(`[MusicCommandService] Library search disabled by config (local+online off): ${songName}`);
+        return null;
+      }
       const rows = await songloft.songs.search(songName) as any[];
       if (!Array.isArray(rows) || rows.length === 0) {
         songloft.log.info(`[MusicCommandService] Library search missed for: ${songName}`);
         return null;
       }
-      const best = this.pickLibrarySong(rows, songName);
+      // 按 is_online 过滤：本地搜索只留曲库曲目，外部搜索只留 ext 联网音源。
+      const allowed = rows.filter((s) => {
+        const online = s?.is_online === true || s?.isOnline === true;
+        return online ? allowOnline : allowLocal;
+      });
+      if (allowed.length === 0) {
+        songloft.log.info(`[MusicCommandService] Library search filtered out by config for: ${songName} (local=${allowLocal}, online=${allowOnline})`);
+        return null;
+      }
+      const best = this.pickLibrarySong(allowed, songName);
       if (!best) {
         songloft.log.info(`[MusicCommandService] Library search has no relevant match for: ${songName}`);
         return null;
@@ -1844,22 +1861,10 @@ export class MusicCommandService {
     songName: string,
     hint: { title: string; artist?: string; duration?: number } | null,
   ): Promise<SongSearchCandidate | null> {
-    // 先查飞牛音乐（零配置）；未命中或整体被 FNMUSIC_MIOT_LIB_SEARCH=0 关掉时，
-    // 再按用户自配的外部搜索源兜底，原有行为完整保留。
-    const library = await this.findLibrarySongCandidate(songName);
-    if (library) return library;
-    if (!(await this.onlineSearcher.isExternalSearchConfigured())) {
-      songloft.log.info('[MusicCommandService] External search not configured, skip online search');
-      return null;
-    }
-
-    const song = await this.onlineSearcher.search(songName, hint);
-    if (!song) {
-      songloft.log.warn(`[MusicCommandService] Online search missed for: ${songName}`);
-      return null;
-    }
-
-    return { source: 'external_search', song };
+    // 搜索统一走飞牛音乐（本地曲库 + ext 联网音源），由
+    // fnmusic_local_search_enabled / fnmusic_online_search_enabled 两个开关控制。
+    // 旧的「用户自配 topone 外部搜索源」配置已在 UI 移除，不再作为兜底。
+    return await this.findLibrarySongCandidate(songName);
   }
 
   private async playSongCandidate(
@@ -1914,7 +1919,7 @@ export class MusicCommandService {
   /**
    * 播放一首独立歌曲（不在任何歌单里）。
    *
-   * 交给 PlaylistManager 建立「点播歌曲在前」的临时歌手列表——playCurrent 已经把
+   * 交给 PlaylistManager 建立单曲点播队列（播完跳 收藏 → 猜你喜欢 → 全部歌曲）——playCurrent 已经把
    * 「读 config 拿 force_mp3/normalize → 构 URL → 分组扇出 → 注册切歌定时器 → 预热 → 更新
    * 播放状态」全做了。旧实现手写直推，漏掉 force_mp3 后音箱拿到不能解码的流就亮灯不出声
    * （songloft-org/songloft-plugin-miot#62），也不注册定时器、网页端看不到在播什么。
@@ -1943,45 +1948,52 @@ export class MusicCommandService {
   ): Promise<SongLocation | null> {
     songloft.log.info(`[MusicCommandService] Matched song: ${loc.songTitle} - ${loc.artist} playlist="${loc.playlistName}" playlistId=${loc.playlistId} songIndex=${loc.songIndex}`);
 
-    // 获取设备配置中的播放模式
-    let playMode: PlayMode = 'order';
-    const devices = await this.configManager.getDevices(accountId);
-    const devCfg = devices.find(d => d.device_id === deviceId);
-    if (devCfg && devCfg.play_mode) {
-      playMode = devCfg.play_mode as PlayMode;
-    }
+    // 语音点歌只播命中的这一首：先把 location 展开成完整 Song（type/duration/url 都要保留，
+    // 否则电台转码与自动切歌定时器会失效），再交给 PlaylistManager 的单曲点播入口。
+    const resolveSong = async (location: SongLocation): Promise<any | null> => {
+      if (location.songId) {
+        try {
+          const song: any = await songloft.songs.getById(location.songId);
+          if (song && song.url) return song;
+        } catch (e) {
+          songloft.log.warn(`[MusicCommandService] getById(${location.songId}) failed: ${String(e)}`);
+        }
+      }
+      try {
+        const songs: any[] = await songloft.playlists.getSongs(location.playlistId, { limit: 100000 } as any);
+        const song = songs && songs[location.songIndex];
+        if (song && song.url) return song;
+      } catch (e) {
+        songloft.log.warn(`[MusicCommandService] playlist songs lookup failed for ${location.playlistId}: ${String(e)}`);
+      }
+      return null;
+    };
 
-    // 按 songId 定位播放：songIndex 来自缓存快照，歌单增删歌曲后会错位（#420）；
-    // songId 是稳定标识，playPlaylistFromSong 在重新加载歌单后按 ID 精确定位。
-    const ok = loc.songId
-      ? await pm.playPlaylistFromSong(loc.playlistId, loc.songId, playMode, loc.songIndex)
-      : await pm.play(loc.playlistId, loc.songIndex, playMode);
-    if (ok) {
-      songloft.log.info(`[MusicCommandService] Play song success: ${loc.songTitle} playlist="${loc.playlistName}" index=${loc.songIndex} mode=${playMode}`);
-      return loc;
-    }
-
-    // 播放失败且因歌单 ID 已失效（扫描后 auto-create 歌单 ID 变化）：刷新索引后重试一次
-    if (pm.isLastPlayNotFound()) {
-      songloft.log.warn(`[MusicCommandService] Stale playlist ID ${loc.playlistId}, refreshing index and retrying`);
+    let target = loc;
+    let song = await resolveSong(target);
+    if (!song) {
+      // 歌单 ID 失效（扫描后 auto-create 歌单 ID 变化）：刷新索引后按歌名重试一次
+      songloft.log.warn(`[MusicCommandService] Song detail unavailable for ${loc.songTitle}, refreshing index and retrying`);
       await this.indexingManager.refresh();
       const newLoc = await this.indexingManager.findSongByName(searchTerm);
       if (newLoc) {
         songloft.log.info(`[MusicCommandService] Re-matched after refresh: ${newLoc.songTitle} playlist="${newLoc.playlistName}" playlistId=${newLoc.playlistId} songIndex=${newLoc.songIndex}`);
-        const retryOk = newLoc.songId
-          ? await pm.playPlaylistFromSong(newLoc.playlistId, newLoc.songId, playMode, newLoc.songIndex)
-          : await pm.play(newLoc.playlistId, newLoc.songIndex, playMode);
-        if (retryOk) {
-          songloft.log.info(`[MusicCommandService] Retry play song success: ${newLoc.songTitle}`);
-          return newLoc;
-        }
+        song = await resolveSong(newLoc);
+        if (song) target = newLoc;
       }
+    }
+    if (!song) {
       songloft.log.error(`[MusicCommandService] Retry play song failed after index refresh: ${requestedSongName}`);
       return null;
     }
 
-    songloft.log.error(`[MusicCommandService] Play song failed: ${loc.songTitle}`);
-    return null;
+    const ok = await pm.playOneOffSong(song, '单曲: ' + (target.songTitle || song.title || ''));
+    if (!ok) {
+      songloft.log.error(`[MusicCommandService] Play song failed: ${loc.songTitle}`);
+      return null;
+    }
+    songloft.log.info(`[MusicCommandService] Play song success (single): ${target.songTitle} playlist="${target.playlistName}" index=${target.songIndex}`);
+    return target;
   }
 
   /**
