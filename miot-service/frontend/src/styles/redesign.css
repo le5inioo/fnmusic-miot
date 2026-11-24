@@ -477,10 +477,11 @@ body { text-rendering: optimizeLegibility; }
 /* 当前播放行不画横向分隔线（保持原样，只去掉底色）。 */
 .song-row-current::after { display: none; }
 .song-row-current .song-title { color: var(--md-primary); font-weight: 600; }
-/* 当前播放行的艺术家/专辑/时长：和标题同色同粗。 */
+/* 当前播放行的艺术家/专辑/时长：和标题同色同粗。用变量而非硬编码紫色，
+   使暗色主题下随 --md-primary 一起变浅，与歌名保持一致。 */
 .song-row-current .song-artist,
 .song-row-current .song-album,
-.song-row-current .song-duration { color: rgb(90, 75, 224); font-weight: 600; }
+.song-row-current .song-duration { color: var(--md-primary); font-weight: 600; }
 .song-actions {
   position: absolute;
   top: 50%;

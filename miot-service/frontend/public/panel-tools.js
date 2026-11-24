@@ -240,10 +240,17 @@
     '    position:relative; isolation:isolate !important; gap:8px !important;',
     '    min-height:0 !important; margin-bottom:8px !important; padding:0 !important;',
     '    border:0 !important; background:transparent !important; }',
-    /* 手机端菜单展开时临时提升工具栏层叠级别：菜单 z-index:220 被 isolation 困在
-       工具栏内部，平时工具栏 z-index:auto 会被列表行盖住。只在菜单打开时提升，
-       避免常驻高 z-index 干扰搜索二级页（z-index:135）。class 由菜单开关 JS 维护。 */
-    '  .miot-page > .player-toolbar.pt-menu-open { z-index:150 !important; }',
+    /* 手机端菜单/歌单下拉展开时临时提升工具栏层叠级别：菜单 220、歌单下拉 300
+       都被 isolation 困在工具栏内部，平时工具栏 z-index:auto 会被列表行盖住。
+       · pt-menu-open  由菜单开关 JS 维护
+       · pt-select-open 由 mount 检测 .toolbar-field 下拉面板维护 */
+    '  .miot-page > .player-toolbar.pt-menu-open,',
+    '  .miot-page > .player-toolbar.pt-select-open { z-index:150 !important; }',
+    /* 搜索二级页不能用「提升整个工具栏」：那会让工具栏容器盖在挂 body 的取消按钮
+       (z-index:141) 之上，导致取消点不到。改为取消工具栏的 isolation，让搜索框
+       自身的 z-index:141 直接在 body 层生效、浮过遮罩(130)；工具栏其余控件
+       (z-index:auto) 与背景伪元素(z-index:-1) 则被遮罩自然盖住，正好只露搜索框。 */
+    '  body.pt-search-mode .miot-page > .player-toolbar { isolation:auto !important; }',
     /* 背景独立铺满视口，工具行按钮保持原位；上贴窗口顶，下贴下一行上沿（8px margin）。 */
     '  .miot-page > .player-toolbar::before { content:""; position:absolute;',
     '    z-index:-1; pointer-events:none;',
@@ -292,7 +299,9 @@
     '  .miot-page > .player-toolbar > .search-bar.pt-open {',
     '    position:fixed !important;',
     '    top:calc(10px + var(--sl-safe-top, 0px)) !important; left:12px !important;',
-    '    right:auto !important; width:calc(100% - 24px - 60px) !important;',
+    /* 宽度在「左右 12px 边距 + 60px 取消按钮」基础上再减 10px，
+       与右侧取消按钮之间留出可见间隙（原本两者边界精确贴合显拥挤）。 */
+    '    right:auto !important; width:calc(100% - 24px - 60px - 10px) !important;',
     '    height:41px !important; min-height:41px !important;',
     '    min-width:0 !important; margin:0 !important; padding:0 14px !important;',
     '    border-radius:999px !important; align-items:center;',
@@ -495,9 +504,9 @@
     '.pt-search-empty { padding:20px 14px; text-align:center;',
     '  color:var(--md-on-surface-variant); }',
     '.miot-page.pt-searching .song-list { opacity:.35; pointer-events:none; }',
-    /* 电脑端：在线结果内联到本地列表下方（普通文档流），并预留滚动条槽位，
-       避免面板显示/隐藏时页面宽度变化导致左右跳动。搜索时列表容器收缩到内容高度，
-       面板才能紧跟在少量本地结果之后出现在首屏。 */
+    /* 电脑端：在线结果内联到本地列表下方（普通文档流），上边缘紧贴本地结果下边缘、
+       用直角边框（圆角上缘会被本地列表盖住）。并预留滚动条槽位，避免面板显示/隐藏时
+       页面宽度变化导致左右跳动。搜索时列表容器收缩到内容高度，面板才能紧跟本地结果。 */
     '@media (min-width:720px) {',
     /* html 滚动条改为不占位：移除 scrollbar-gutter 预留的 10px 槽位。
        该槽位由浏览器绘制、内容无法覆盖，导致工具栏淡紫背景与播放条专辑色
@@ -507,9 +516,11 @@
     '  html::-webkit-scrollbar { display:none; width:0; height:0; }',
     '  .pt-search-panel { position:static !important; z-index:auto !important;',
     '    width:auto !important; max-height:none !important;',
-    '    margin:12px 0 0 !important; overflow:visible !important;',
+    /* 上边缘紧贴本地结果列表下边缘（取消原 12px 间隙），避免圆角边框被本地行盖住。 */
+    '    margin:0 !important; overflow:visible !important;',
+    /* 直角边框：与本地列表的直角卡片风格统一，贴合处不留弧形缺口。 */
     '    border:1px solid var(--md-outline-variant) !important;',
-    '    border-radius:16px !important; box-shadow:none !important; }',
+    '    border-radius:0 !important; box-shadow:none !important; }',
     '  .miot-page.pt-searching .song-list { opacity:1 !important; pointer-events:auto !important; }',
     '  .miot-page.pt-searching .sl-list-view { height:auto !important; overflow:visible !important; }',
     '}',
@@ -1100,6 +1111,11 @@
     if (resume && field && field.previousElementSibling !== resume) {
       toolbar.insertBefore(resume, field);
     }
+    // 歌单下拉面板（.sl-select-panel-fixed，z-index:300）被工具栏 isolation 困住，
+    // 工具栏自身 z-index:auto 时会被下方歌曲列表行盖住、点不到。下拉打开期间同步
+    // pt-select-open 提升工具栏层级，关闭即撤销（与菜单 pt-menu-open 同一手法）。
+    var fieldOpen = !!(field && field.querySelector('.sl-select-panel'));
+    toolbar.classList.toggle('pt-select-open', fieldOpen);
     handleChatActivity();
   }
   mount();
