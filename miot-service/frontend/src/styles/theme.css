@@ -48,6 +48,8 @@
   --md-surface-container: #f0eef7;
   --md-surface-container-high: #eae8f2;
   --md-surface-container-highest: #e4e1ed;
+  /* 歌曲列表奇数行斑马纹底色（独立于通用 surface 变量，避免影响 hover/卡片）。 */
+  --md-song-row-odd-bg: #f2f0f8;
   /* 播放器横条按钮 hover 圆底：30% 透明（避免 color-mix 在旧 WebView 不支持） */
   --md-player-hover-layer: rgba(234, 232, 242, 0.3);
 
@@ -131,6 +133,7 @@
   --md-surface-container: #1d1c24;
   --md-surface-container-high: #282631;
   --md-surface-container-highest: #33313c;
+  --md-song-row-odd-bg: #282631;
   /* 深色主题下 hover 圆底改用浅色半透明叠加：原来用深灰 rgba(40,38,49,.3)
      叠在深色背景上几乎没有对比，看起来像没有 hover 效果。 */
   --md-player-hover-layer: rgba(234, 232, 242, 0.2);
@@ -198,6 +201,7 @@
     --md-surface-container: #1d1c24;
     --md-surface-container-high: #282631;
     --md-surface-container-highest: #33313c;
+    --md-song-row-odd-bg: #282631;
     /* 深色主题下 hover 圆底改用浅色半透明叠加：原来用深灰 rgba(40,38,49,.3)
        叠在深色背景上几乎没有对比，看起来像没有 hover 效果。 */
     --md-player-hover-layer: rgba(234, 232, 242, 0.2);

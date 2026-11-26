@@ -68,7 +68,7 @@ function setSwitch(key: keyof typeof state.config, value: boolean) { void saveCo
   <SectionCard title="触屏歌词与封面" icon="lyrics">
     <SettingRow title="触屏音箱显示歌词"><SlSwitch aria-label="触屏音箱显示歌词" :model-value="state.config.touchscreen_lyrics_enabled" @update:model-value="setSwitch('touchscreen_lyrics_enabled', $event)" /></SettingRow>
     <div v-if="state.config.touchscreen_lyrics_enabled" class="dependency-hint"><SlIcon name="info" :size="18" /><span>逐首匹配云端曲库，冷门或自制歌曲可能匹配不到，时间轴也可能不同步。</span></div>
-    <div class="form-body"><div class="field"><label class="field-label">封面缺失兜底图</label><div class="inline-fields"><SlSelect :model-value="String(state.config.default_cover_id || coverOptions[0].value)" :options="coverSelectOptions" aria-label="封面缺失兜底图" @update:model-value="saveConfig({ default_cover_id: $event })" /><img :src="coverPreview" alt="封面缺失兜底图预览" style="width:56px;height:56px;object-fit:cover;border-radius:8px" /></div></div></div>
+    <div class="form-body"><div class="field"><label class="field-label">封面缺失兜底图</label><div class="inline-fields"><SlSelect :model-value="String(state.config.default_cover_id || coverOptions[0].value)" :options="coverSelectOptions" aria-label="封面缺失兜底图" searchable search-placeholder="搜索封面" @update:model-value="saveConfig({ default_cover_id: $event })" /><img :src="coverPreview" alt="封面缺失兜底图预览" style="width:56px;height:56px;object-fit:cover;border-radius:8px" /></div></div></div>
   </SectionCard>
 
   <SlDisclosure title="高级语音衔接" icon="record_voice_over">

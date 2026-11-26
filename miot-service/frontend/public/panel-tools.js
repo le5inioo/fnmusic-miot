@@ -489,8 +489,9 @@
     '  padding:9px 14px; cursor:pointer; outline:none;',
     '  border-bottom:1px solid var(--md-outline-variant); }',
     '.pt-search-row:last-child { border-bottom:0; }',
+    /* 在线结果行 hover/焦点：与本地歌曲行一致，统一用 secondary-container。 */
     '.pt-search-row:hover, .pt-search-row:focus {',
-    '  background:var(--md-surface-container-high, #0001); }',
+    '  background:var(--md-secondary-container); }',
     '.pt-search-row .pt-s-title { flex:1 1 auto; min-width:0;',
     '  overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }',
     '.pt-search-row .pt-s-artist { flex:0 1 34%; min-width:0;',
@@ -505,7 +506,8 @@
     '  color:var(--md-on-surface-variant); }',
     '.miot-page.pt-searching .song-list { opacity:.35; pointer-events:none; }',
     /* 电脑端：在线结果内联到本地列表下方（普通文档流），上边缘紧贴本地结果下边缘、
-       用直角边框（圆角上缘会被本地列表盖住）。并预留滚动条槽位，避免面板显示/隐藏时
+       用直角边框（圆角上缘会被本地列表盖住）。左右边线去掉，只保留上下横向边线与
+       行间分割线，与本地结果列表连成一体。并预留滚动条槽位，避免面板显示/隐藏时
        页面宽度变化导致左右跳动。搜索时列表容器收缩到内容高度，面板才能紧跟本地结果。 */
     '@media (min-width:720px) {',
     /* html 滚动条改为不占位：移除 scrollbar-gutter 预留的 10px 槽位。
@@ -518,11 +520,25 @@
     '    width:auto !important; max-height:none !important;',
     /* 上边缘紧贴本地结果列表下边缘（取消原 12px 间隙），避免圆角边框被本地行盖住。 */
     '    margin:0 !important; overflow:visible !important;',
-    /* 直角边框：与本地列表的直角卡片风格统一，贴合处不留弧形缺口。 */
+    /* 直角边框：与本地列表的直角卡片风格统一，贴合处不留弧形缺口。
+       左右边线去掉（border-left/right:0），只保留上下横向分割线。 */
     '    border:1px solid var(--md-outline-variant) !important;',
+    '    border-left:0 !important; border-right:0 !important;',
+    /* 去掉在线面板纯白底（--md-surface-container-lowest），融入本地列表背景；
+       手机端二级页有独立 !important 背景覆盖，不受此处影响。 */
+    '    background:transparent !important;',
     '    border-radius:0 !important; box-shadow:none !important; }',
     '  .miot-page.pt-searching .song-list { opacity:1 !important; pointer-events:auto !important; }',
     '  .miot-page.pt-searching .sl-list-view { height:auto !important; overflow:visible !important; }',
+    '}',
+
+    /* 手机端全局禁用长按文本选择工具栏（拷贝/全选/查询/翻译）。
+       touch-callout 关 iOS 长按气泡，user-select 关文本选取；作用于所有元素
+       （含设置页、全屏播放器、动态注入的搜索面板/菜单）。输入框保留 text，
+       避免搜索框无法输入/移动光标。 */
+    '@media (max-width:719px) {',
+    '  * { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }',
+    '  input, textarea { -webkit-user-select: text; user-select: text; }',
     '}',
   ].join('\n');
 

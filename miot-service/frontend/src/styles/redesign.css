@@ -467,7 +467,7 @@ body { text-rendering: optimizeLegibility; }
 /* 斑马纹：奇数行底色；偶数行无底色。正在播放行也参与斑马纹，保留其本来的
    背景色，只靠紫色加粗文字区分。
    用组件下发的真实序号 index 判断（虚拟列表 DOM 位置会变，nth-child 不可靠）。 */
-.song-row.song-row-odd { background: var(--md-surface-container-high); }
+.song-row.song-row-odd { background: var(--md-song-row-odd-bg); }
 /* 鼠标悬停高亮：覆盖斑马纹底色。 */
 .song-row:hover { background: var(--md-secondary-container); }
 /* 正在播放行：无底色，仅用紫色文字标识。 */
@@ -749,8 +749,9 @@ body { text-rendering: optimizeLegibility; }
   align-items: center;
   padding: 0 12px;
 }
-.fullscreen-collapse-button.sl-button-icon { width: 48px; height: 48px; }
-.fullscreen-collapse-button .sl-icon { font-size: 32px; }
+/* 收起播放器按钮：图标改为白色（展开页背景随专辑色变化，白色在该按钮上更清晰）。 */
+.fullscreen-collapse-button.sl-button-icon { width: 48px; height: 48px; color: #fff; }
+.fullscreen-collapse-button .sl-icon { font-size: 32px; color: #fff; }
 .fullscreen-topbar-title {
   overflow: hidden;
   color: var(--md-on-surface);
